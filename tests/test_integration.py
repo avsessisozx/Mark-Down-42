@@ -158,6 +158,45 @@ class LoginTests(EngineBase):
         self.assertTrue(self.engine.logged_in)
 
 
+class AccountTests(EngineBase):
+    def logs(self):
+        return " | ".join(e["text"] for e in self.engine.snapshot()["logs"])
+
+    def test_cookies_given_at_start_skip_login(self):
+        self.fake.logged_in = False
+        self.assertTrue(self.engine.start(self.settings(limit=3), {"sessionid": "abc123", "mid": "MIDX"}))
+        self.assertTrue(wait_for(lambda: not self.engine.running, 60), self.logs())
+        self.assertEqual(len(self.store.export_views()), 3)
+        self.assertIn("Hesap çerezleri yerleştirildi", self.logs())
+        self.assertNotIn("abc123", self.logs())          # değerler günlüğe yazılmaz
+
+    def test_account_verified_message(self):
+        self.fake.logged_in = False
+        self.engine.start(self.settings(), {"sessionid": "abc123"})
+        self.assertTrue(wait_for(lambda: "Hesap doğrulandı" in self.logs(), 40), self.logs())
+
+    def test_rejected_cookie_is_reported(self):
+        self.fake.logged_in = False
+        self.engine.start(self.settings(), {"sessionid": "badbad1"})
+        self.assertTrue(wait_for(lambda: "kabul etmedi" in self.logs(), 40), self.logs())
+
+    def test_account_added_while_running(self):
+        self.fake.logged_in = False
+        self.engine.start(self.settings())
+        self.assertTrue(wait_for(lambda: self.engine.phase == "giris", 30))
+        self.engine.command("import_cookies", cookies={"sessionid": "abc123"})
+        self.assertTrue(wait_for(lambda: self.engine.views >= 2, 40), self.logs())
+        self.assertTrue(self.engine.logged_in)
+
+    def test_logout_clears_session(self):
+        self.fake.logged_in = False
+        self.engine.start(self.settings(), {"sessionid": "abc123"})
+        self.assertTrue(wait_for(lambda: self.engine.views >= 1, 40), self.logs())
+        self.engine.command("logout")
+        self.assertTrue(wait_for(lambda: not self.engine.logged_in and self.engine.phase == "giris", 20), self.logs())
+        self.assertIn("Hesap kaldırıldı", self.logs())
+
+
 class LoginPageTests(EngineBase):
     def test_logged_out_on_reels_goes_to_login_page(self):
         self.fake.logged_in = False
@@ -223,6 +262,74 @@ class ServerTests(EngineBase):
                 return r.status, json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read().decode("utf-8"))
+
+    def post(self, path, body, headers=None, token=False):
+        req = urllib.request.Request(self.url + path, data=json.dumps(body).encode(), method="POST")
+        req.add_header("Content-Type", "application/json")
+        if token:
+            req.add_header("X-Token", self.state.token)
+        for k, v in (headers or {}).items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read().decode("utf-8")), dict(r.headers)
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8")), dict(exc.headers)
+
+    def test_extension_session_flow(self):
+        ext = {"Origin": "chrome-extension://abcdefghijklmnop"}
+        cookies = {"sessionid": "12345678%3Aabcdefghij%3A5%3AAYdxyz", "mid": "M1", "ig_did": "D-1"}
+        # kod istenmeden gelen istek reddedilir
+        self.assertEqual(self.post("/api/extension-session", {"token": "x", "cookies": cookies}, ext)[0], 403)
+        self.assertEqual(self.post("/api/login-chrome", {}, token=True)[1]["ok"], True)
+        self.assertTrue(self.state.chrome_waiting())
+        # eklenti kökeni yoksa (sıradan bir web sayfası) reddedilir, kod yanmaz
+        self.assertEqual(self.post("/api/extension-session", {"token": self.state.ext_token, "cookies": cookies})[0], 403)
+        self.assertEqual(self.post("/api/extension-session", {"token": "yanlis", "cookies": cookies}, ext)[0], 403)
+        self.assertTrue(self.state.chrome_waiting())
+        # tarayıcı yönlendirmesi (CORS ön denemesi)
+        pre = urllib.request.Request(self.url + "/api/extension-session", method="OPTIONS", headers=ext)
+        with urllib.request.urlopen(pre, timeout=10) as r:
+            self.assertEqual(r.status, 204)
+            self.assertEqual(r.headers["Access-Control-Allow-Origin"], ext["Origin"])
+        status, body, headers = self.post("/api/extension-session", {"token": self.state.ext_token, "cookies": cookies}, ext)
+        self.assertEqual((status, body.get("ok")), (200, True))
+        self.assertEqual(headers.get("Access-Control-Allow-Origin"), ext["Origin"])
+        self.assertEqual(set(self.state.pending_cookies), {"sessionid", "mid", "ig_did", "ds_user_id"})
+        self.assertFalse(self.state.chrome_waiting(), "kod tek kullanımlık olmalı")
+        self.assertEqual(self.post("/api/extension-session", {"token": "tekrar", "cookies": cookies}, ext)[0], 403)
+        self.assertTrue(self.call("/api/state")[1]["account"]["pending"])
+
+    def test_extension_session_without_login_is_rejected(self):
+        ext = {"Origin": "chrome-extension://abcdefghijklmnop"}
+        self.post("/api/login-chrome", {}, token=True)
+        status, body, _ = self.post("/api/extension-session", {"token": self.state.ext_token, "cookies": {"mid": "M1"}}, ext)
+        self.assertEqual(status, 400)
+        self.assertEqual(self.state.pending_cookies, {})
+
+    def test_paste_cookie_and_start_uses_account(self):
+        self.fake.logged_in = False
+        self.assertEqual(self.post("/api/login-cookie", {"cookie": "çöp çöp"}, token=True)[0], 400)
+        sid = "12345678%3Aabcdefghij%3A5%3AAYdxyz"
+        self.assertEqual(self.post("/api/login-cookie", {"cookie": "sessionid=" + sid}, token=True)[0], 200)
+        self.assertEqual(self.state.pending_cookies["sessionid"], sid)
+        self.state.pending_cookies = {"sessionid": "abc123"}      # sahte site yalnız bu değeri kabul eder
+        self.post("/api/settings", {"scenario": "skip", "limit": 2, "start_url": self.base + "/reels/"}, token=True)
+        self.assertTrue(self.post("/api/start", {}, token=True)[1]["ok"])
+        self.assertEqual(self.state.pending_cookies, {})
+        self.assertTrue(wait_for(lambda: not self.state.engine.running, 60))
+        self.assertEqual(self.state.engine.views, 2)
+
+    def test_extension_folder_and_logout(self):
+        status, body, _ = self.post("/api/extension-open", {}, token=True)
+        self.assertEqual(status, 200)
+        self.assertTrue((Path(body["path"]) / "manifest.json").is_file())
+        self.assertTrue((Path(body["path"]) / "background.js").is_file())
+        (self.state.data_dir / "tarayici-chrome").mkdir()
+        (self.state.data_dir / "tarayici-bileseni").mkdir()
+        self.assertTrue(self.post("/api/logout", {}, token=True)[1]["ok"])
+        self.assertFalse((self.state.data_dir / "tarayici-chrome").exists())
+        self.assertTrue((self.state.data_dir / "tarayici-bileseni").exists(), "indirilen tarayıcı bileşenine dokunulmamalı")
 
     def test_api_flow(self):
         with urllib.request.urlopen(self.url + "/", timeout=10) as r:

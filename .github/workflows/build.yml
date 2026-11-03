@@ -42,6 +42,7 @@ jobs:
           --name ReelsGozlemci
           --icon assets/icon.ico
           --add-data "reels_gozlemci/ui;reels_gozlemci/ui"
+          --add-data "reels_gozlemci/chrome_eklenti;reels_gozlemci/chrome_eklenti"
           --collect-all playwright
           main.py
 
@@ -63,9 +64,27 @@ jobs:
           name: ReelsGozlemci
           path: dist/ReelsGozlemci.exe
 
+  eklenti:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bağımlılıkları kur
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Chrome eklentisi uçtan uca (gerçek Chromium'a yüklenir)
+        env:
+          REELS_GOZLEMCI_BROWSER: chromium
+        run: python -m unittest tests.test_extension -v
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [windows]
+    needs: [windows, eklenti]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

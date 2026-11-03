@@ -114,7 +114,10 @@ def self_test() -> str:
         with urllib.request.urlopen(f"http://127.0.0.1:{state.port}/api/state", timeout=5) as resp:
             snap = json.loads(resp.read().decode("utf-8"))
         assert snap.get("phase") == "hazir", "state not ready"
-        from . import extract
+        from . import extract, session
+        from .server import extension_source
+        assert (extension_source() / "manifest.json").is_file(), "extension folder missing"
+        assert session.parse_session_input("sessionid=12345678%3Aabcdefghij")["sessionid"], "session parser broken"
         sample = '{"data":{"a":{"edges":[{"node":{"media":{"code":"Abc123","pk":"1","like_count":5,"video_duration":3.5}}}]}}}'
         assert extract.extract_media(sample)[0]["code"] == "Abc123", "extractor broken"
     finally:

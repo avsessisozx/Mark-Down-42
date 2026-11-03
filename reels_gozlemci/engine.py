@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional
 from urllib.parse import urlsplit
 
-from . import __version__, extract, winbrowsers
+from . import __version__, extract, session, winbrowsers
 from .paths import app_data_dir, screen_size
 from .report import redact
 from .store import Store, iso
@@ -84,7 +84,7 @@ class Engine:
         self.settings: Dict[str, Any] = {}
         # durum
         self.phase = "hazir"
-        self.message = "Başlat'a bas; açılan tarayıcıda Instagram'a giriş yap."
+        self.message = "Önce \"Hesap ekle\", sonra Başlat'a bas."
         self.logged_in = False
         self.paused = False
         self.browser_name = ""
@@ -107,6 +107,9 @@ class Engine:
         self._login_page_shown = False
         self._cookie_names_logged = False
         self._quiet_responses = 0
+        self._initial_cookies: Dict[str, str] = {}
+        self._went_to_start = False
+        self._verify_at = 0.0
 
     # ------------------------------------------------------------------ dışarıya
     @property
@@ -142,11 +145,14 @@ class Engine:
         with self._lock:
             self._cmds.append((name, kw))
 
-    def start(self, settings: Dict[str, Any]) -> bool:
+    def start(self, settings: Dict[str, Any], cookies: Optional[Dict[str, str]] = None) -> bool:
         with self._lock:
             if self.running:
                 return False
             self.settings = dict(settings)
+            self._initial_cookies = dict(cookies or {})
+            self._went_to_start = False
+            self._verify_at = 0.0
             self._stop.clear()
             self._cmds.clear()
             self.paused = False
@@ -282,7 +288,24 @@ class Engine:
         pages = self.context.pages
         self.page = pages[0] if pages else await self.context.new_page()
         self.page.on("close", lambda *_: None)
+        if self._initial_cookies:
+            await self._apply_cookies(self._initial_cookies)
+            self._initial_cookies = {}
         await self._goto(self.settings["start_url"])
+
+    async def _apply_cookies(self, cookies: Dict[str, str]) -> None:
+        """Chrome'dan gelen hesap çerezlerini bu tarayıcının kalıcı profiline yerleştirir (değerler yazılmaz)."""
+        items = session.cookie_items(cookies, self.settings["start_url"])
+        try:
+            await self.context.add_cookies(items)
+        except Exception as exc:
+            self.log("error", f"Hesap çerezleri yerleştirilemedi: {str(exc).splitlines()[0]}")
+            return
+        self.log("ok", "Hesap çerezleri yerleştirildi: " + ", ".join(sorted(cookies)))
+        self._verify_at = time.monotonic() + 9.0
+        self._login_page_shown = True        # çerezler yeni geldi: giriş sayfasına gitme, Reels'i dene
+        self._went_to_start = True
+        self.logged_in = await self._is_logged_in()   # eski "giriş yok" bilgisi yüzünden yanlışlıkla giriş sayfasına gitme
 
     async def _goto(self, url: str) -> None:
         try:
@@ -384,7 +407,6 @@ class Engine:
     async def _loop(self) -> None:
         tick = 0.25
         last_login_check = 0.0
-        went_to_start_after_login = False
         while not self._stop.is_set():
             if not self._page_alive():
                 raise BrowserGone()
@@ -402,11 +424,20 @@ class Engine:
                     self.logged_in = await self._is_logged_in()
                     if self.logged_in and not was:
                         self.log("ok", "Giriş yapıldı.")
-                        if not went_to_start_after_login and "/reel" not in self.page_url:
-                            went_to_start_after_login = True
+                        if not self._went_to_start and "/reel" not in self.page_url:
+                            self._went_to_start = True
                             await self._goto(self.settings["start_url"])
                     if was and not self.logged_in:
                         self.log("warn", "Oturum kapandı.")
+            if self._verify_at and now >= self._verify_at:
+                self._verify_at = 0.0
+                bad = (not self.logged_in) or "/accounts/login" in self.page_url or "/challenge" in self.page_url
+                if bad:
+                    self.log("warn", "Instagram eklenen hesabı kabul etmedi (oturum geçersiz, süresi dolmuş ya da doğrulama istiyor). "
+                                     "Chrome'da Instagram'a girişli olduğundan emin olup 'Hesap ekle'yi tekrar dene.")
+                else:
+                    self.log("ok", "Hesap doğrulandı: Instagram oturumu kabul etti.")
+
             if not self.logged_in:
                 if not self._login_page_shown and "/accounts/login" not in self.page_url and "/challenge" not in self.page_url:
                     self._login_page_shown = True       # giriş yokken Reels'te kalma: doğrudan giriş sayfası
@@ -444,6 +475,21 @@ class Engine:
                 if self._view is not None:
                     self._view.target = self._pick_target()
                 self.log("info", "Devam ediyor.")
+            elif name == "import_cookies":
+                cookies = kw.get("cookies") or {}
+                if cookies:
+                    await self._apply_cookies(cookies)
+                    await self._goto(self.settings["start_url"])
+            elif name == "logout":
+                try:
+                    await self.context.clear_cookies()
+                except Exception as exc:
+                    self.log("warn", f"Çerezler silinemedi: {exc}")
+                self.logged_in = False
+                self._login_page_shown = False
+                self._went_to_start = False
+                self.log("info", "Hesap kaldırıldı (çerezler silindi).")
+                await self._goto(self.settings["start_url"])
             elif name == "star" and self._view is not None:
                 self._view.starred = not self._view.starred
                 self.log("info", ("İşaretlendi: " if self._view.starred else "İşaret kalktı: ") + self._view.code)

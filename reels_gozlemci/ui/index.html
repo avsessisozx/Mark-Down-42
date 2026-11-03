@@ -56,6 +56,28 @@
 <div class="wrap">
   <h1>Reels Gözlemci <small>v__VERSION__</small></h1>
 
+  <div class="card" id="accCard">
+    <div class="status"><span id="accDot" class="dot"></span><div><div id="accTitle" style="font-weight:600">Hesap: yok</div><div id="accMsg" class="msg"></div></div></div>
+    <div class="row" style="margin-top:10px">
+      <button id="bAcc" class="pri">Hesap ekle (Chrome'dan)</button>
+      <button id="bAccOut" class="bad" style="flex:none;width:110px">Hesabı kaldır</button>
+    </div>
+    <details style="margin-top:8px">
+      <summary>Nasıl eklenir? / Giriş yapamıyorum</summary>
+      <ol class="small" style="padding-left:18px;margin:8px 0">
+        <li>İlk kez: <b>Eklentiyi kur</b>'a bas, açılan klasörü Chrome'da <code>chrome://extensions</code> → Geliştirici modu → Paketlenmemiş öğe yükle ile seç. (Instagram İndirici'nin eklentisi kuruluysa tekrar kurma.)</li>
+        <li><b>Hesap ekle</b>'ye bas. Chrome'da Instagram açılır; <b>yedek hesabınla</b> giriş yap.</li>
+        <li>Sayfada yeşil şerit çıkınca bu programa dön ve <b>Başlat</b>'a bas.</li>
+      </ol>
+      <div class="row"><button id="bExt">Eklentiyi kur</button></div>
+      <label for="cookieIn">Eklenti olmuyorsa: Chrome'daki sessionid değerini yapıştır</label>
+      <div class="row">
+        <input type="text" id="cookieIn" placeholder="sessionid değeri…">
+        <button id="bCookie" style="flex:none;width:70px">Gönder</button>
+      </div>
+    </details>
+  </div>
+
   <div class="card">
     <div class="status"><span id="dot" class="dot"></span><div><div id="phase" style="font-weight:600">Hazır</div><div id="msg" class="msg"></div></div></div>
     <div class="row" style="margin-top:10px">
@@ -169,6 +191,20 @@ function onSettingsChanged() {
 }
 ["scn", "minS", "maxS", "limit", "auto"].forEach(id => $(id).addEventListener("change", onSettingsChanged));
 
+function holdMsg(t) { $("accMsg").textContent = t; $("accMsg").dataset.hold = Date.now(); }
+$("bAcc").onclick = async () => {
+  holdMsg("Chrome'da Instagram açılıyor…");
+  const r = await api("/api/login-chrome", {});
+  if (!r.opened) holdMsg("Tarayıcı açılamadı. instagram.com'u kendin aç; eklenti kuruluysa yine de çalışır.");
+};
+$("bAccOut").onclick = async () => { if (confirm("Hesap kaldırılsın mı? (Tarayıcıdaki oturum silinir)")) await api("/api/logout", {}); };
+$("bExt").onclick = async () => { const r = await api("/api/extension-open", {}); holdMsg(r.ok ? "Klasör açıldı: " + r.path : (r.error || "Hata")); };
+$("bCookie").onclick = async () => {
+  const v = $("cookieIn").value.trim(); if (!v) return;
+  const r = await api("/api/login-cookie", { cookie: v });
+  holdMsg(r.ok ? "Hesap bilgisi alındı." : (r.error || "Hata"));
+  if (r.ok) $("cookieIn").value = "";
+};
 $("bStart").onclick = async () => { await api("/api/start", settingsFromForm()); };
 $("bPause").onclick = async () => { await api(lastState && lastState.paused ? "/api/resume" : "/api/pause", {}); };
 $("bStop").onclick = async () => { await api("/api/stop", {}); };
@@ -187,6 +223,14 @@ $("bReport").onclick = async () => {
 function render(s) {
   lastState = s;
   if (!settingsLoaded && s.settings) { fillSettings(s.settings); settingsLoaded = true; }
+  const acc = s.account || {};
+  let accState = "yok", accText = "Hesap: yok", accHint = "“Hesap ekle”ye bas (yedek hesap kullan).";
+  if (s.running && s.logged_in) { accState = "calisiyor"; accText = "Hesap: bağlı ✓"; accHint = "Instagram oturumu açık."; }
+  else if (acc.waiting) { accState = "giris"; accText = "Hesap: bekleniyor…"; accHint = "Chrome'da giriş yap; yeşil şerit çıkınca buraya dön."; }
+  else if (acc.pending) { accState = "calisiyor"; accText = "Hesap: eklendi ✓"; accHint = "Şimdi Başlat'a bas."; }
+  else if (s.running && !s.logged_in) { accState = "giris"; accText = "Hesap: giriş yapılmadı"; accHint = "“Hesap ekle”yi kullan ya da soldaki pencerede giriş yap."; }
+  $("accDot").className = "dot " + accState; $("accTitle").textContent = accText;
+  if (!$("accMsg").dataset.hold || Date.now() - +$("accMsg").dataset.hold > 6000) $("accMsg").textContent = accHint;
   $("dot").className = "dot " + s.phase;
   $("phase").textContent = PHASES[s.phase] || s.phase;
   $("msg").textContent = s.message || "";

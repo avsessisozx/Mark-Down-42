@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reels_gozlemci import export, extract, paths, report
+from reels_gozlemci import export, extract, paths, report, session
 from reels_gozlemci.store import Store
 
 
@@ -106,6 +106,44 @@ class SettingsAndReportTests(unittest.TestCase):
         self.assertNotIn("ABC123", text)
         self.assertNotIn("XYZ", text)
         self.assertIn("Reels Gözlemci raporu", text)
+
+
+class SessionTests(unittest.TestCase):
+    SID = "12345678%3Aabcdefghij%3A5%3AAYdxyz"
+
+    def test_bare_sessionid(self):
+        got = session.parse_session_input(self.SID)
+        self.assertEqual(got["sessionid"], self.SID)
+        self.assertEqual(got["ds_user_id"], "12345678")
+
+    def test_colon_form_is_encoded(self):
+        got = session.parse_session_input("sessionid=12345678:abcdefghij:5:AYdxyz")
+        self.assertEqual(got["sessionid"], self.SID)
+
+    def test_cookie_line_and_device_cookies(self):
+        line = f"Cookie: sessionid={self.SID}; csrftoken=Tok123456; mid=MIDVAL; ig_did=AAAA-BBBB; datr=DATRVAL; foo=bar"
+        got = session.parse_session_input(line)
+        self.assertEqual(set(got), {"sessionid", "csrftoken", "mid", "ig_did", "datr", "ds_user_id"})
+        self.assertNotIn("foo", got)
+
+    def test_devtools_tab_format(self):
+        got = session.parse_session_input(f"sessionid\t{self.SID}\t.instagram.com\t/")
+        self.assertEqual(got["sessionid"], self.SID)
+
+    def test_invalid(self):
+        for bad in ("", "   ", "kısa", "a b c", "sessionid=", "x=y"):
+            self.assertEqual(session.parse_session_input(bad), {}, bad)
+
+    def test_clean_cookies_from_extension(self):
+        got = session.clean_cookies({"sessionid": self.SID, "mid": "M1", "evil": "x", "csrftoken": 5})
+        self.assertEqual(set(got), {"sessionid", "mid", "ds_user_id"})
+        self.assertEqual(session.clean_cookies("yok"), {})
+
+    def test_cookie_items_domains(self):
+        items = session.cookie_items({"sessionid": self.SID}, "https://www.instagram.com/reels/")
+        self.assertEqual((items[0]["domain"], items[0]["secure"], items[0]["httpOnly"]), (".instagram.com", True, True))
+        items = session.cookie_items({"sessionid": self.SID}, "http://127.0.0.1:8000/reels/")
+        self.assertEqual((items[0]["domain"], items[0]["secure"]), ("127.0.0.1", False))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Testler için sahte Instagram Reels sitesi.
 
 Gerçek Reels sayfasının test edilebilen davranışlarını taklit eder:
-  * giriş yoksa /accounts/login/ sayfasına yönlendirir; giriş /__set_login?on=1 ile açılır
+  * geçerli çerez (sessionid=abc123) yoksa /accounts/login/ sayfasına yönlendirir (başka değer = Instagram'ın reddettiği oturum); giriş /__set_login?on=1 ile açılır
   * /reels/ sayfası: her biri tam ekran 30 Reel, kaydırınca adres /reels/<kod>/ olur
   * ArrowDown ya da fare tekerleği ile sonraki Reel'e geçilir
   * Reel bilgisi sayfanın kendi POST /api/graphql isteğiyle 10'ar 10'ar gelir (gerçek biçime benzer iç içe yapı)
@@ -128,7 +128,7 @@ def make_handler(state: FakeState):
             self.wfile.write(body)
 
         def _has_cookie(self):
-            return "sessionid=" in (self.headers.get("Cookie") or "")
+            return "sessionid=abc123" in (self.headers.get("Cookie") or "")
 
         def do_GET(self):
             u = urlsplit(self.path)
