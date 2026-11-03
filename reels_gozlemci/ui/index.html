@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Reels Gözlemci</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#14161a; --card:#1e2127; --line:#2c3038; --txt:#e8eaed; --dim:#9aa0a6; --acc:#ff8a3d; --ok:#4cc38a; --warn:#f2b84b; --bad:#ef6a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.4 "Segoe UI",system-ui,sans-serif; }
+  .wrap { padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; }
+  h1 { font-size:16px; margin:0; display:flex; justify-content:space-between; align-items:center; }
+  h1 small { color:var(--dim); font-weight:400; font-size:12px; }
+  .status { display:flex; gap:10px; align-items:center; }
+  .dot { width:12px; height:12px; border-radius:50%; background:var(--dim); flex:none; }
+  .dot.calisiyor { background:var(--ok); box-shadow:0 0 8px var(--ok); animation:pulse 1.4s infinite; }
+  .dot.duraklatildi, .dot.giris { background:var(--warn); }
+  .dot.hata { background:var(--bad); }
+  @keyframes pulse { 50% { opacity:.45; } }
+  .msg { color:var(--dim); font-size:13px; }
+  .user { font-weight:600; font-size:15px; }
+  .ad { background:var(--warn); color:#000; border-radius:6px; padding:0 6px; font-size:11px; margin-left:6px; }
+  .cap { color:var(--dim); font-size:13px; max-height:3.9em; overflow:hidden; margin:4px 0 8px; }
+  .nums { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; text-align:center; }
+  .nums div { background:#262a31; border-radius:10px; padding:6px 2px; }
+  .nums b { display:block; font-size:15px; }
+  .nums span { color:var(--dim); font-size:11px; }
+  .bar { height:8px; background:#262a31; border-radius:6px; overflow:hidden; margin:3px 0 8px; }
+  .bar i { display:block; height:100%; background:var(--acc); width:0; transition:width .25s; }
+  .bar.w i { background:var(--ok); }
+  .lbl { display:flex; justify-content:space-between; color:var(--dim); font-size:12px; }
+  .row { display:flex; gap:8px; }
+  button { flex:1; background:#2b2f37; color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:9px 6px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.pri { background:var(--acc); color:#1b1206; border:none; font-weight:600; }
+  button.bad { color:var(--bad); }
+  button:disabled { opacity:.4; cursor:default; }
+  label { display:block; color:var(--dim); font-size:12px; margin:8px 0 3px; }
+  select, input[type=number], input[type=text] { width:100%; background:#262a31; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px; font:inherit; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:8px; color:var(--txt); font-size:13px; }
+  .chk input { width:auto; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  td { padding:3px 2px; border-bottom:1px solid var(--line); }
+  td.r { text-align:right; color:var(--dim); }
+  .tag { font-size:10px; padding:0 5px; border-radius:5px; background:#33373f; color:var(--dim); }
+  .tag.o { background:#3a2c1c; color:var(--acc); }
+  pre { margin:0; max-height:170px; overflow:auto; font:11px/1.35 Consolas,monospace; color:var(--dim); white-space:pre-wrap; word-break:break-word; }
+  pre .warn { color:var(--warn); } pre .error { color:var(--bad); } pre .ok { color:var(--ok); }
+  summary { cursor:pointer; color:var(--dim); }
+  .small { font-size:12px; color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Reels Gözlemci <small>v__VERSION__</small></h1>
+
+  <div class="card">
+    <div class="status"><span id="dot" class="dot"></span><div><div id="phase" style="font-weight:600">Hazır</div><div id="msg" class="msg"></div></div></div>
+    <div class="row" style="margin-top:10px">
+      <button id="bStart" class="pri">Başlat</button>
+      <button id="bPause" disabled>Duraklat</button>
+      <button id="bStop" class="bad" disabled>Bitir</button>
+    </div>
+  </div>
+
+  <div class="card" id="curCard">
+    <div id="curEmpty" class="msg">Henüz bir Reel görünmüyor.</div>
+    <div id="curBox" style="display:none">
+      <div class="user"><span id="cUser">-</span><span id="cAd" class="ad" style="display:none">REKLAM</span></div>
+      <div id="cCap" class="cap"></div>
+      <div class="nums">
+        <div><b id="nLike">-</b><span>beğeni</span></div>
+        <div><b id="nCom">-</b><span>yorum</span></div>
+        <div><b id="nPlay">-</b><span>izlenme</span></div>
+        <div><b id="nShare">-</b><span>paylaşım</span></div>
+      </div>
+      <div class="lbl" style="margin-top:10px"><span>Ekranda kalma</span><span id="tDwell">0 sn</span></div>
+      <div class="bar"><i id="bDwell"></i></div>
+      <div class="lbl"><span>Gerçek izleme</span><span id="tWatch">0 sn</span></div>
+      <div class="bar w"><i id="bWatch"></i></div>
+      <div class="row">
+        <button id="bStar">⭐ İşaretle</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="noteIn" placeholder="Not yaz (bu Reel için)…">
+        <button id="bNote" style="flex:none;width:70px">Ekle</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="two">
+      <div>
+        <label for="scn">Senaryo</label>
+        <select id="scn">
+          <option value="fixed">Sabit aralık</option>
+          <option value="skip">Hemen kaydır</option>
+          <option value="full">Sonuna kadar izle</option>
+          <option value="mix">Karışık (insan gibi)</option>
+        </select>
+      </div>
+      <div>
+        <label for="limit">Kaç Reel (0 = sınırsız)</label>
+        <input type="number" id="limit" min="0" step="10">
+      </div>
+    </div>
+    <div class="two" id="rangeRow">
+      <div><label for="minS">En az (sn)</label><input type="number" id="minS" min="0.5" step="0.5"></div>
+      <div><label for="maxS">En çok (sn)</label><input type="number" id="maxS" min="0.5" step="0.5"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="auto"> Kendisi kaydırsın</label>
+    <div class="small" style="margin-top:6px">Süre her Reel'de bu aralıkta rastgele seçilir (tam aynı sürede kaydırmak bot gibi görünür).</div>
+  </div>
+
+  <div class="card">
+    <div class="lbl"><span>Bu oturumda</span><span><b id="sViews">0</b> izleme · <b id="sKnown">0</b> Reel bilgisi</span></div>
+    <table id="recent"></table>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="bExport">Dışa aktar (CSV+JSON)</button>
+      <button id="bFolder">Klasörü aç</button>
+    </div>
+    <div class="small" id="expInfo" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Günlük ve hata raporu</summary>
+      <div class="row" style="margin:8px 0">
+        <button id="bReport">Raporu kopyala</button>
+      </div>
+      <pre id="log"></pre>
+    </details>
+  </div>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__";
+const $ = id => document.getElementById(id);
+let settingsLoaded = false, lastState = null, editing = 0;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Token": TOKEN }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  return r.json();
+}
+const fmt = n => (n === null || n === undefined) ? "-" : (n >= 1e6 ? (n/1e6).toFixed(1) + " Mn" : n >= 1e4 ? (n/1e3).toFixed(1) + " B" : String(n));
+const PHASES = { hazir: "Hazır", tarayici: "Tarayıcı açılıyor", giris: "Giriş bekleniyor", calisiyor: "Çalışıyor", duraklatildi: "Duraklatıldı", bitti: "Bitti", hata: "Hata" };
+
+function settingsFromForm() {
+  return { scenario: $("scn").value, min_s: parseFloat($("minS").value) || 3, max_s: parseFloat($("maxS").value) || 6,
+           limit: parseInt($("limit").value) || 0, auto: $("auto").checked };
+}
+function fillSettings(s) {
+  $("scn").value = s.scenario; $("minS").value = s.min_s; $("maxS").value = s.max_s;
+  $("limit").value = s.limit; $("auto").checked = !!s.auto; showRange();
+}
+function showRange() { $("rangeRow").style.display = $("scn").value === "fixed" ? "grid" : "none"; }
+
+let saveTimer = null;
+function onSettingsChanged() {
+  showRange(); editing = Date.now();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => api("/api/settings", settingsFromForm()), 400);
+}
+["scn", "minS", "maxS", "limit", "auto"].forEach(id => $(id).addEventListener("change", onSettingsChanged));
+
+$("bStart").onclick = async () => { await api("/api/start", settingsFromForm()); };
+$("bPause").onclick = async () => { await api(lastState && lastState.paused ? "/api/resume" : "/api/pause", {}); };
+$("bStop").onclick = async () => { await api("/api/stop", {}); };
+$("bStar").onclick = async () => { await api("/api/star", {}); };
+$("bNote").onclick = async () => { const t = $("noteIn").value.trim(); if (t) { await api("/api/note", { text: t }); $("noteIn").value = ""; } };
+$("noteIn").addEventListener("keydown", e => { if (e.key === "Enter") $("bNote").click(); });
+$("bExport").onclick = async () => { $("expInfo").textContent = "Yazılıyor…"; const r = await api("/api/export", {}); $("expInfo").textContent = r.ok ? "Kaydedildi: " + r.folder : "Hata: " + (r.error || ""); };
+$("bFolder").onclick = async () => { const r = await api("/api/open-folder", {}); if (r.folder) $("expInfo").textContent = r.folder; };
+$("bReport").onclick = async () => {
+  const r = await api("/api/report-copy", {});
+  try { if (!r.ok) await navigator.clipboard.writeText(r.text); $("bReport").textContent = "Kopyalandı ✓"; }
+  catch (e) { $("bReport").textContent = "Kopyalanamadı"; window.prompt("Raporu kopyala:", r.text.slice(0, 2000)); }
+  setTimeout(() => $("bReport").textContent = "Raporu kopyala", 2500);
+};
+
+function render(s) {
+  lastState = s;
+  if (!settingsLoaded && s.settings) { fillSettings(s.settings); settingsLoaded = true; }
+  $("dot").className = "dot " + s.phase;
+  $("phase").textContent = PHASES[s.phase] || s.phase;
+  $("msg").textContent = s.message || "";
+  const run = s.running;
+  $("bStart").disabled = run; $("bPause").disabled = !run || !s.logged_in; $("bStop").disabled = !run;
+  $("bPause").textContent = s.paused ? "Devam" : "Duraklat";
+  const c = s.current || {};
+  const has = !!c.code;
+  $("curEmpty").style.display = has ? "none" : ""; $("curBox").style.display = has ? "" : "none";
+  if (has) {
+    $("cUser").textContent = c.username ? "@" + c.username : (c.known ? "-" : "(bilgi bekleniyor…)");
+    $("cAd").style.display = c.is_ad ? "" : "none";
+    $("cCap").textContent = c.caption || "";
+    $("nLike").textContent = fmt(c.likes); $("nCom").textContent = fmt(c.comments); $("nPlay").textContent = fmt(c.plays); $("nShare").textContent = fmt(c.shares);
+    const dwell = c.dwell || 0, watched = c.watched || 0, dur = c.duration || 0;
+    const target = s.next_in !== null && s.next_in !== undefined ? dwell + s.next_in : Math.max(dwell, dur || 10);
+    $("tDwell").textContent = dwell.toFixed(1) + " sn" + (s.next_in != null && s.auto && !s.paused ? " · " + s.next_in.toFixed(1) + " sn sonra kaydırır" : "");
+    $("bDwell").style.width = Math.min(100, target ? dwell / target * 100 : 0) + "%";
+    $("tWatch").textContent = watched.toFixed(1) + " sn" + (dur ? " / " + dur.toFixed(1) + " sn video" : "");
+    $("bWatch").style.width = Math.min(100, dur ? watched / dur * 100 : 0) + "%";
+    $("bStar").textContent = c.starred ? "⭐ İşaretli (kaldır)" : "⭐ İşaretle";
+  }
+  $("sViews").textContent = s.views; $("sKnown").textContent = s.reels_known;
+  $("recent").innerHTML = (s.recent || []).map(r => {
+    const pct = r.duration ? Math.round(Math.min(1, (r.watched || 0) / r.duration) * 100) + "%" : "-";
+    return `<tr><td>${r.starred ? "⭐ " : ""}${r.username ? "@" + r.username : r.code}${r.is_ad ? ' <span class="tag o">reklam</span>' : ""}</td>
+      <td class="r">${(r.dwell || 0).toFixed(1)} sn</td><td class="r">izlenen ${pct}</td><td class="r"><span class="tag">${r.action === "otomatik" ? "oto" : "elle"}</span></td></tr>`;
+  }).join("");
+  const pre = $("log");
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+  pre.innerHTML = (s.logs || []).filter(e => e.level !== "debug" || true).map(e => `<span class="${e.level}">${e.t} ${e.text.replace(/</g, "&lt;")}</span>`).join("\n");
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+}
+
+async function poll() {
+  try { render(await api("/api/state")); } catch (e) { $("msg").textContent = "Programla bağlantı kesildi."; }
+  setTimeout(poll, 600);
+}
+poll();
+</script>
+</body>
+</html>
