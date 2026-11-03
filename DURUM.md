@@ -3,7 +3,7 @@
 > Claude'un çalışma notu. Yalnızca `durum` dalında durur; `main`'e, README'ye ve sürüm notlarına girmez.
 > Yeni sohbette önce bunu oku, repoyu baştan tarama. Her sürümden sonra güncelle.
 
-Son güncelleme: 2026-11-03 · Son sürüm: **v0.1.0** (2026-11-03)
+Son güncelleme: 2026-11-03 · Son sürüm: **v0.1.1** (2026-11-03)
 
 ## Ne yapıyor
 Instagram Reels'i izleyip kaydıran, normal kullanıcıya görünen her şeyi (hesap, açıklama, müzik, beğeni, yorum,
@@ -33,6 +33,13 @@ Kullanıcı: Türkçe, programcı değil; kendi kullanacak. Yedek hesapla kullan
 - v0.1.0 (2026-11-03): ilk sürüm, yukarıdakilerin hepsi. DOĞRULANDI: sahte Instagram'a karşı (Linux Chromium + CI'da gerçek Edge)
   otomatik kaydırma, duraklat/devam, yıldız/not, klavye engelliyse tekerlek, adres değişmiyorsa sayfadan kod, "sonuna kadar",
   giriş bekleme, sunucu uçları, dışa aktarma, EXE öz testi.
+
+- v0.1.1 (2026-11-03): kullanıcının ilk gerçek raporu (Chrome, Windows 10): oturum 17 sn sürdü, `logged_in=False`, adres
+  `/reels/<kod>/` (Instagram girişsizken Reel görünümü açıyor), 4 yanıt, 0 Reel; pencere kapandı. Rapor panoda Türkçe karakterleri
+  bozuk geldi (PowerShell stdin OEM kodlaması). Düzeltmeler: pano UTF-8 dosyadan (`server._copy_to_clipboard`, Windows CI testi),
+  girişsizken doğrudan `/accounts/login/` açılır, ana sekme kapanınca başka sekmeye geçilir, günlükte sayfa değişimleri + çerez ADLARI +
+  Reel içermeyen yanıtlar + kapanma nedeni. Testler: birim 8, uçtan uca 12 (+LoginPageTests, ClipboardTests Windows).
+  Kullanıcı girişi yapmadan pencereyi kapatmış olabilir; nedeni kesin değil (yeni rapora bak).
 
 ## Yarım / sıradaki
 - DOĞRULANMADI (gerçek Instagram): (1) kendi pencerede giriş doğrulama kilidine takılıyor mu (eski projede sıfır profil takılmıştı;
