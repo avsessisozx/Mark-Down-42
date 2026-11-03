@@ -3,7 +3,7 @@
 > Claude'un çalışma notu. Yalnızca `durum` dalında durur; `main`'e, README'ye ve sürüm notlarına girmez.
 > Yeni sohbette önce bunu oku, repoyu baştan tarama. Her sürümden sonra güncelle.
 
-Son güncelleme: 2026-11-03 · Son sürüm: **v0.1.1** (2026-11-03)
+Son güncelleme: 2026-11-03 · Son sürüm: **v0.2.0** (2026-11-03)
 
 ## Ne yapıyor
 Instagram Reels'i izleyip kaydıran, normal kullanıcıya görünen her şeyi (hesap, açıklama, müzik, beğeni, yorum,
@@ -41,13 +41,26 @@ Kullanıcı: Türkçe, programcı değil; kendi kullanacak. Yedek hesapla kullan
   Reel içermeyen yanıtlar + kapanma nedeni. Testler: birim 8, uçtan uca 12 (+LoginPageTests, ClipboardTests Windows).
   Kullanıcı girişi yapmadan pencereyi kapatmış olabilir; nedeni kesin değil (yeni rapora bak).
 
+- v0.2.0 (2026-11-03): HESAP EKLEME, Instagram İndirici'deki gibi (kullanıcı: "kendi pencerede giriş yaptırmışsın, Instagram İndirici'nin son sürümündeki gibi yap").
+  Akış: UI "Hesap ekle (Chrome'dan)" → `/api/login-chrome` tek kullanımlık kod (10 dk) → varsayılan tarayıcıda `https://www.instagram.com/#ii=<port>.<kod>` →
+  Chrome eklentisi (`chrome_eklenti/`, Instagram İndirici'ninkiyle AYNI protokol `#ii=`; kullanıcıda zaten kurulu olan eklenti çalışır, ikisini birden kurma) çerezleri
+  `POST /api/extension-session` (kökeni `chrome-extension://`, kod tek kullanımlık, CORS ön denemesi `do_OPTIONS`) ile yollar → `state.add_account` (motor çalışıyorsa
+  `import_cookies` komutu, değilse `pending_cookies`, Başlat'ta `engine.start(settings, cookies)`) → `engine._apply_cookies` kalıcı profile `add_cookies`, 9 sn sonra doğrulama
+  (günlükte "Hesap doğrulandı" / "kabul etmedi"). Yedekler: sessionid yapıştır (`/api/login-cookie`, `session.parse_session_input` = Instagram İndirici'ninki), `/api/extension-open`
+  (eklentiyi AppData'ya kopyalar), `/api/logout` (çerezleri siler / `tarayici-*` profillerini siler; `tarayici-bileseni`ne dokunmaz).
+  Hata bulundu+düzeltildi: çalışırken hesap eklenince eski "giriş yok" bilgisiyle giriş sayfasına gidiyordu (`_apply_cookies` artık `logged_in`'i yeniler).
+  DOĞRULANDI: gerçek eklenti gerçek Chromium'a yüklenip program sunucusuna oturum gönderdi (`tests/test_extension.py`, CI'da ayrı Linux işi `eklenti`; kod yanlışsa reddediliyor,
+  giriş sonradan yapılınca otomatik gidiyor); sunucu uçları; motorda çerezle başlama/canlı ekleme/reddedilen çerez/çıkış. Testler: birim 15, uçtan uca 26, eklenti 3.
+  DOĞRULANMADI (gerçek Instagram): eklenti çerezleriyle program tarayıcısının girişli sayılması (cihaz çerezleri mid/ig_did/datr ile); Instagram doğrulama (challenge) istemesi;
+  eklentinin varsayılan tarayıcı Chrome değilse (Edge) çalışmaması.
+
 ## Yarım / sıradaki
 - DOĞRULANMADI (gerçek Instagram): (1) kendi pencerede giriş doğrulama kilidine takılıyor mu (eski projede sıfır profil takılmıştı;
   burada kalıcı profil); (2) gerçek Reels sayfasında ArrowDown kaydırıyor mu, adres /reels/<kod>/ oluyor mu; (3) Reels sayfasının
   yüklediği JSON'da beğeni/yorum/izlenme/paylaşım alanları var mı, hangileri gizli; (4) reklam işareti (`ad_id` vb.) gerçek adlarla uyuşuyor mu;
   (5) pencere yerleşimi (sol/sağ) ve `sessionid` çerez kontrolü.
   Kullanıcıdan istenecek: ilk denemede "Raporu kopyala" çıktısı (günlükte `yanıt: N kayıt` satırları ve `responses_with_media` sayısı).
-- Giriş yedekleri (gerekirse): Instagram İndirici'deki Chrome eklentisi + `sessionid` yapıştırma; doğrulama atlatma YOK.
+- Doğrulama (challenge) çıkarsa atlatma yardımı YOK; kullanıcı kendi tamamlar.
 - Sırada: Android sürümü (kural: iki platformda da olmalı), "sadece X'i beğen" senaryosu (hesapta işlem yapar, riskli),
   İngilizce arayüz, analiz aracı (konu etiketleme, grafik, "bu video neden önerildi" tahmini), Hikayeler/gönderi akışı.
 - Ek: görünür beğeni durumu (`has_liked`) yalnız yanıttan; kullanıcının elle beğenisini ayrıca yakalamıyoruz.
