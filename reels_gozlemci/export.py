@@ -10,11 +10,11 @@ from typing import Any, Dict, List
 
 from .store import Store
 
-VIEW_COLUMNS = ["session_id", "seq", "time", "code", "username", "action", "dwell", "watched", "duration",
+VIEW_COLUMNS = ["session_id", "scenario", "seq", "time", "code", "username", "action", "dwell", "watched", "duration",
                 "watched_frac", "loops", "starred", "note", "is_ad", "like_count", "comment_count", "play_count",
-                "reshare_count", "has_liked", "music", "hashtags", "caption", "taken_at"]
+                "reshare_count", "send_count", "has_liked", "music", "hashtags", "caption", "taken_at"]
 REEL_COLUMNS = ["code", "username", "full_name", "caption", "hashtags", "music", "like_count", "comment_count",
-                "play_count", "reshare_count", "like_first", "comment_first", "play_first", "duration", "product_type",
+                "play_count", "reshare_count", "send_count", "like_first", "comment_first", "play_first", "duration", "product_type",
                 "taken_at", "is_ad", "has_liked", "likes_hidden", "location", "first_seen", "last_seen", "n_views",
                 "total_dwell", "total_watched", "pk"]
 

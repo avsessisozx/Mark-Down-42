@@ -81,6 +81,46 @@ def _first_int(d: Dict[str, Any], *keys: str) -> Optional[int]:
     return None
 
 
+def _deep_first_int(d: Any, names: tuple, maxdepth: int = 3) -> Optional[int]:
+    """Önce üst düzeyde, sonra (en çok maxdepth kat) iç içe sözlüklerde, adı verilenlerden ilk sayıyı bulur."""
+    level = [d]
+    for _ in range(maxdepth + 1):
+        nxt = []
+        for cur in level:
+            if not isinstance(cur, dict):
+                continue
+            for n in names:
+                v = _int(cur.get(n))
+                if v is not None:
+                    return v
+            nxt.extend(v for v in cur.values() if isinstance(v, dict))
+        level = nxt
+    return None
+
+
+_COUNT_KEY = re.compile(r"(play|view|share|repost|send|forward|impression|reach|save|like|comment|react|count)", re.I)
+
+
+def numeric_fields(d: Any, prefix: str = "", depth: int = 0, out: Optional[List[tuple]] = None) -> List[tuple]:
+    """Ham kayıttaki sayı taşıyan, adı sayaç gibi görünen alanlar: [(yol, değer)]. Alan adlarını keşfetmek için."""
+    out = [] if out is None else out
+    if depth > 5 or len(out) >= 80:
+        return out
+    if isinstance(d, dict):
+        for k, v in d.items():
+            path = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and _COUNT_KEY.search(str(k)):
+                out.append((path, v))
+            elif isinstance(v, (dict, list)):
+                numeric_fields(v, path, depth + 1, out)
+    elif isinstance(d, list):
+        for item in d[:3]:
+            numeric_fields(item, prefix + "[]", depth + 1, out)
+    return out
+
+
 def _dig(d: Any, *path: str) -> Any:
     for p in path:
         if not isinstance(d, dict):
@@ -136,8 +176,10 @@ def media_record(d: Dict[str, Any]) -> Dict[str, Any]:
         "hashtags": " ".join("#" + h for h in _HASHTAG.findall(caption_text)),
         "like_count": _first_int(d, "like_count"),
         "comment_count": _first_int(d, "comment_count"),
-        "play_count": _first_int(d, "play_count", "ig_play_count", "view_count", "video_view_count"),
-        "reshare_count": _first_int(d, "reshare_count", "share_count"),
+        "play_count": _deep_first_int(d, ("play_count", "ig_play_count", "view_count", "video_view_count",
+                                          "fb_play_count", "video_play_count")),
+        "reshare_count": _deep_first_int(d, ("reshare_count", "repost_count", "reposts_count")),
+        "send_count": _deep_first_int(d, ("send_count", "sends_count", "direct_send_count", "share_count")),
         "duration": float(duration) if duration is not None else None,
         "music": _music(d),
         "product_type": str(d.get("product_type") or ""),

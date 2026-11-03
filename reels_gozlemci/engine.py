@@ -68,14 +68,16 @@ class View:
     starred: bool = False
     notes: List[str] = field(default_factory=list)
     no_scroll_until: float = 0.0
+    embedded_tried: bool = False
 
     def dwell(self) -> float:
         return time.monotonic() - self.t_mono
 
 
 class Engine:
-    def __init__(self, store: Store, data_dir=None):
+    def __init__(self, store: Store, data_dir=None, live=None):
         self.store = store
+        self.live = live                      # LiveWriter ya da None
         self.data_dir = data_dir or app_data_dir()
         self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
@@ -137,6 +139,8 @@ class Engine:
                 "responses_seen": self.responses_seen, "responses_with_media": self.responses_with_media,
                 "scroll_fail": self.scroll_fail, "current": cur, "current_code": self.current_code,
                 "next_in": self.next_in, "url": self.page_url,
+                "live": ({"path": self.live.status()[0], "error": self.live.status()[1], "written": self.live.written}
+                         if self.live is not None else None),
                 "recent": self.store.recent_views(self.session_id, 8) if self.session_id else [],
                 "logs": list(self._logs)[-120:],
             }
@@ -367,7 +371,8 @@ class Engine:
             self.current = {
                 "code": code, "username": info.get("username", ""), "caption": (info.get("caption") or "")[:300],
                 "likes": info.get("like_count"), "comments": info.get("comment_count"),
-                "plays": info.get("play_count"), "shares": info.get("reshare_count"), "music": info.get("music", ""),
+                "plays": info.get("play_count"), "shares": info.get("reshare_count"), "sends": info.get("send_count"),
+                "music": info.get("music", ""),
                 "is_ad": bool(info.get("is_ad")), "duration": info.get("duration"), "known": bool(info),
             }
 
@@ -577,6 +582,9 @@ class Engine:
             v.last_t = t
         if not self.current.get("known"):
             self._refresh_current(v.code)
+            if not self.current.get("known") and not v.embedded_tried and v.dwell() > 0.8:
+                v.embedded_tried = True
+                await self._read_embedded(v.code)
 
         self.phase = "duraklatildi" if self.paused else "calisiyor"
         auto = bool(self.settings.get("auto")) and not self.paused
@@ -596,6 +604,31 @@ class Engine:
         if auto and ready and time.monotonic() >= v.no_scroll_until:
             await self._scroll()
 
+    async def _read_embedded(self, code: str) -> None:
+        """Reel'in bilgisi sayfa açılırken HTML'e gömülü geldiyse (ilk Reel) oradan oku."""
+        js = """(code) => { const out = [];
+          for (const s of document.querySelectorAll('script[type="application/json"]')) {
+            const t = s.textContent || '';
+            if (t.includes(code)) { out.push(t.slice(0, 4000000)); if (out.length >= 4) break; }
+          } return out; }"""
+        try:
+            texts = await self.page.evaluate(js, code)
+        except Exception:
+            return
+        total = 0
+        for text in texts or []:
+            try:
+                for rec in extract.extract_media(text):
+                    self.store.upsert_media(rec)
+                    total += 1
+            except Exception as exc:
+                self.log("debug", f"gömülü veri çözülemedi: {exc}")
+        if total:
+            self.log("debug", f"gömülü veriden {total} kayıt okundu ({code}).")
+            self._refresh_current(code)
+        else:
+            self.log("debug", f"Reel {code}: sayfaya gömülü veri de bulunamadı.")
+
     async def _close_view(self, action: str) -> None:
         v = self._view
         if v is None:
@@ -606,6 +639,13 @@ class Engine:
             "dwell": round(v.dwell(), 2), "watched": round(v.watched, 2), "duration": v.duration, "loops": v.loops,
             "action": action, "starred": 1 if v.starred else 0, "note": " | ".join(v.notes)})
         self.views += 1
+        if v.duration:
+            self.store.set_duration_if_missing(v.code, v.duration)
+        if self.live is not None:
+            try:
+                self.live.on_view()
+            except Exception as exc:               # canlı yazma asıl işi asla bozmasın
+                self.log("warn", f"Canlı yazma hatası: {exc}")
 
     async def _scroll(self) -> None:
         before = self._view.code if self._view else None

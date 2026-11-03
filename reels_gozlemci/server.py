@@ -19,7 +19,9 @@ from urllib.parse import urlsplit
 
 from . import __version__, export, report, session, winbrowsers
 from .engine import Engine
-from .paths import app_data_dir, clean_settings, default_export_dir, load_settings, save_settings
+from .livewrite import LiveWriter
+from .paths import (app_data_dir, check_writable, clean_settings, default_export_dir, fallback_export_dir,
+                    load_settings, save_settings)
 from .store import Store
 
 APP_ID = "reels-gozlemci"
@@ -57,13 +59,15 @@ class AppState:
         self.data_dir = Path(data_dir) if data_dir else app_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(self.data_dir / "reels.sqlite3")
-        self.engine = Engine(self.store, self.data_dir)
         self.settings: Dict[str, Any] = load_settings()
+        self.live = LiveWriter(self.store, self._live_dir, lambda level, text: self.engine.log(level, text))
+        self.engine = Engine(self.store, self.data_dir, self.live)
         self.token = secrets.token_urlsafe(16)
         self.last_poll = 0.0
         self.port = 0
         self.last_export = ""
         self.ext_token = ""
+        self._last_live_warning = ""
         self.ext_expires = 0.0
         self.pending_cookies: Dict[str, str] = {}      # Chrome'dan gelen, henüz tarayıcıya yerleştirilmemiş hesap
 
@@ -92,6 +96,30 @@ class AppState:
         d = self.settings.get("out_dir") or ""
         return Path(d) if d else default_export_dir()
 
+    def resolve_out_dir(self) -> tuple:
+        """(klasör, uyarı): seçilen klasör yazılabilirse o; değilse yedek klasör ve nedenini anlatan uyarı."""
+        wanted = self.out_dir()
+        err = check_writable(wanted)
+        if err is None:
+            return wanted, ""
+        backup = fallback_export_dir()
+        err2 = check_writable(backup)
+        if err2 is not None:
+            return wanted, f"Klasöre yazılamadı ({wanted}): {err}. Yedek klasör de açılamadı: {err2}"
+        return backup, (f"Seçili klasöre yazılamadı ({wanted}): {err}. Veriler yedek klasöre yazıldı: {backup}")
+
+    def _live_dir(self) -> Optional[Path]:
+        """Canlı yazma klasörü: ayar kapalıysa None; seçili klasör yazılamıyorsa yedek klasör (bir kez uyarılır)."""
+        if not self.settings.get("live_write"):
+            return None
+        folder, warning = self.resolve_out_dir()
+        if warning and warning != self._last_live_warning:
+            self._last_live_warning = warning
+            self.engine.log("warn", warning)
+        if check_writable(folder) is not None:
+            return None
+        return folder
+
 
 def _open_folder(path: Path) -> None:
     if os.environ.get("REELS_GOZLEMCI_NO_OPEN"):
@@ -114,6 +142,32 @@ def _open_in_default_browser(url: str) -> bool:
         return bool(webbrowser.open(url))
     except Exception:
         return False
+
+
+def pick_folder(initial: str = "") -> Optional[str]:
+    """Windows'un klasör seçme penceresini açar; seçilen yolu ya da (iptal/başarısız) None döndürür."""
+    if sys.platform != "win32" or os.environ.get("REELS_GOZLEMCI_NO_OPEN"):
+        return os.environ.get("REELS_GOZLEMCI_TEST_PICK") or None
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$f = New-Object System.Windows.Forms.FolderBrowserDialog
+$f.Description = 'Verilerin kaydedileceği klasörü seç'
+$f.ShowNewFolderButton = $true
+if ($env:RG_INITIAL -and (Test-Path -LiteralPath $env:RG_INITIAL)) { $f.SelectedPath = $env:RG_INITIAL }
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.StartPosition = 'CenterScreen'
+if ($f.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }
+"""
+    try:
+        res = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script],
+                             env=dict(os.environ, RG_INITIAL=initial), capture_output=True, timeout=600,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        out = res.stdout.decode("utf-8", "replace").strip()
+        return out or None
+    except Exception:
+        return None
 
 
 def _copy_to_clipboard(text: str) -> bool:
@@ -182,6 +236,32 @@ def make_handler(state: AppState):
             except Exception:
                 return {}
 
+        def _analysis(self, query: str) -> Dict[str, Any]:
+            """Analiz penceresi ve Veriler sekmesi için: izleme kayıtları (Reel bilgisiyle birleşik) + oturumlar."""
+            from urllib.parse import parse_qs
+            try:
+                limit = int(parse_qs(query).get("limit", ["0"])[0])
+            except ValueError:
+                limit = 0
+            rows = state.store.export_views()
+            if limit > 0:
+                rows = rows[-limit:]
+            slim = []
+            for r in rows:
+                r = dict(r)
+                r["caption"] = (r.get("caption") or "")[:400]
+                for k in ("t_end", "has_liked", "taken_at", "loops"):
+                    r.pop(k, None)
+                slim.append(r)
+            return {"views": slim, "sessions": state.store.sessions(), "total": state.store.views_total()}
+
+        def _report_snapshot(self) -> Dict[str, Any]:
+            snap = state.engine.snapshot()
+            snap["numeric_fields"] = state.store.numeric_fields_summary()
+            folder, warning = state.resolve_out_dir()
+            snap["out_dir"] = f"{folder}" + (f" (UYARI: {warning})" if warning else "")
+            return snap
+
         # --------------------------------------------------------------- GET
         def do_GET(self) -> None:
             if not self._host_ok():
@@ -191,6 +271,12 @@ def make_handler(state: AppState):
                 html = (ui_dir() / "index.html").read_text(encoding="utf-8")
                 html = html.replace("__TOKEN__", state.token).replace("__VERSION__", __version__)
                 return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            if path in ("/analiz", "/analiz.html"):
+                html = (ui_dir() / "analiz.html").read_text(encoding="utf-8")
+                html = html.replace("__TOKEN__", state.token).replace("__VERSION__", __version__)
+                return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            if path == "/api/analysis":
+                return self._json(self._analysis(urlsplit(self.path).query))
             if path == "/api/ping":
                 return self._json({"app": APP_ID, "version": __version__})
             if path == "/api/state":
@@ -200,11 +286,11 @@ def make_handler(state: AppState):
                 snap["version"] = __version__
                 snap["views_total"] = state.store.views_total()
                 snap["last_export"] = state.last_export
+                snap["default_out_dir"] = str(default_export_dir())
                 snap["account"] = {"pending": bool(state.pending_cookies), "waiting": state.chrome_waiting()}
                 return self._json(snap)
             if path == "/api/report":
-                snap = state.engine.snapshot()
-                return self._json({"text": report.build(state.settings, snap)})
+                return self._json({"text": report.build(state.settings, self._report_snapshot())})
             self._json({"error": "not_found"}, 404)
 
         def do_OPTIONS(self) -> None:
@@ -296,21 +382,47 @@ def make_handler(state: AppState):
                 eng.command("note", text=str(data.get("text") or ""))
                 return self._json({"ok": True})
             if path == "/api/export":
+                base, warning = state.resolve_out_dir()
                 try:
-                    folder = export.export_all(state.store, state.out_dir())
+                    folder = export.export_all(state.store, base)
                 except OSError as exc:
-                    return self._json({"ok": False, "error": str(exc)}, 500)
+                    msg = f"{type(exc).__name__}: {exc}"
+                    eng.log("error", f"Dışa aktarılamadı ({base}): {msg}")
+                    return self._json({"ok": False, "error": f"Dışa aktarılamadı ({base}): {msg}"}, 500)
                 state.last_export = str(folder)
+                if warning:
+                    eng.log("warn", warning)
                 eng.log("ok", f"Dışa aktarıldı: {folder}")
                 _open_folder(folder)
-                return self._json({"ok": True, "folder": str(folder)})
+                return self._json({"ok": True, "folder": str(folder), "warning": warning})
             if path == "/api/open-folder":
-                target = Path(state.last_export) if state.last_export else state.out_dir()
-                target.mkdir(parents=True, exist_ok=True)
+                target, warning = state.resolve_out_dir()
+                if state.last_export and Path(state.last_export).is_dir():
+                    target = Path(state.last_export)
                 _open_folder(target)
-                return self._json({"ok": True, "folder": str(target)})
+                return self._json({"ok": True, "folder": str(target), "warning": warning})
+            if path == "/api/folder-test":
+                wanted = state.out_dir()
+                err = check_writable(wanted)
+                if err is None:
+                    eng.log("ok", f"Klasör denendi, yazılabiliyor: {wanted}")
+                    return self._json({"ok": True, "folder": str(wanted)})
+                eng.log("error", f"Klasöre yazılamadı ({wanted}): {err}")
+                return self._json({"ok": False, "folder": str(wanted), "error": err})
+            if path == "/api/pick-folder":
+                chosen = pick_folder(str(state.out_dir()))
+                if not chosen:
+                    return self._json({"ok": False, "cancelled": True})
+                err = check_writable(Path(chosen))
+                state.settings = save_settings({**state.settings, "out_dir": chosen})
+                if err:
+                    eng.log("error", f"Seçilen klasöre yazılamıyor ({chosen}): {err}")
+                else:
+                    eng.log("ok", f"Veri klasörü seçildi: {chosen}")
+                return self._json({"ok": True, "folder": chosen, "writable": err is None, "error": err or "",
+                                   "settings": state.settings})
             if path == "/api/report-copy":
-                text = report.build(state.settings, eng.snapshot())
+                text = report.build(state.settings, self._report_snapshot())
                 return self._json({"ok": _copy_to_clipboard(text), "text": text})
             self._json({"error": "not_found"}, 404)
 

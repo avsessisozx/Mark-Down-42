@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Reels Gözlemci – Analiz</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#14161a; --card:#1e2127; --card2:#262a31; --line:#2c3038; --txt:#e8eaed; --dim:#9aa0a6; --acc:#ff8a3d; --acc2:#4cc38a; --blue:#6aa8ff; --warn:#f2b84b; --bad:#ef6a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 "Segoe UI",system-ui,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  header small { color:var(--dim); font-weight:400; }
+  .wrap { padding:14px 18px 40px; display:flex; flex-direction:column; gap:14px; max-width:1500px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+  .card h2 { font-size:14px; margin:0 0 2px; }
+  .card .hint { color:var(--dim); font-size:12px; margin-bottom:10px; }
+  .filters { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+  .filters label { display:block; color:var(--dim); font-size:12px; margin-bottom:3px; }
+  select, input[type=text] { background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 9px; font:inherit; min-width:150px; }
+  button { background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 12px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.on { background:var(--acc); color:#1b1206; border-color:var(--acc); font-weight:600; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { background:#3a2c1c; color:var(--acc); border-radius:999px; padding:3px 10px; font-size:12px; cursor:pointer; }
+  .chip:hover { text-decoration:line-through; }
+  .cards { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; }
+  .stat b { display:block; font-size:22px; }
+  .stat span { color:var(--dim); font-size:12px; }
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+  .row { display:grid; grid-template-columns:215px 1fr 60px; gap:8px; align-items:center; padding:3px 4px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .row:hover, .row.act { background:var(--card2); }
+  .row .lb { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .tr { background:var(--card2); border-radius:5px; height:12px; overflow:hidden; }
+  .row.act .tr { background:#3a2c1c; }
+  .row .tr i { display:block; height:100%; background:var(--acc); border-radius:5px; }
+  .row .vl { text-align:right; color:var(--dim); }
+  .grp { margin-bottom:12px; }
+  .grp .gt { font-weight:600; margin-bottom:3px; display:flex; justify-content:space-between; }
+  .grp .gt span { color:var(--dim); font-weight:400; font-size:12px; }
+  .mini { display:grid; grid-template-columns:90px 1fr 70px; gap:8px; align-items:center; font-size:12px; color:var(--dim); margin:2px 0; }
+  .mini .tr { background:var(--card2); border-radius:5px; height:10px; overflow:hidden; }
+  .mini .tr i { display:block; height:100%; border-radius:5px; }
+  .hist { display:flex; align-items:flex-end; gap:6px; height:170px; padding-top:8px; }
+  .hist .col { flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%; }
+  .hist .bar { width:100%; background:var(--blue); border-radius:5px 5px 0 0; min-height:2px; }
+  .hist .bar:hover { filter:brightness(1.25); }
+  .hist .n { font-size:11px; color:var(--dim); margin-bottom:2px; }
+  .hist .x { font-size:11px; color:var(--dim); margin-top:4px; white-space:nowrap; }
+  .seg { display:inline-flex; gap:0; }
+  .seg button { border-radius:0; }
+  .seg button:first-child { border-radius:8px 0 0 8px; }
+  .seg button:last-child { border-radius:0 8px 8px 0; }
+  svg text { fill:var(--dim); font-size:11px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--dim); font-weight:600; padding:7px 8px; border-bottom:1px solid var(--line); cursor:pointer; white-space:nowrap; position:sticky; top:50px; background:var(--card); }
+  th:hover { color:var(--acc); }
+  td { padding:6px 8px; border-bottom:1px solid var(--line); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  tr.rw:hover td { background:var(--card2); cursor:pointer; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .tag { font-size:10px; padding:1px 6px; border-radius:5px; background:#3a2c1c; color:var(--acc); }
+  #tip { position:fixed; pointer-events:none; background:#000d; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font-size:12px; max-width:320px; display:none; z-index:50; white-space:pre-line; }
+  #drawer { position:fixed; right:0; top:0; bottom:0; width:420px; background:var(--card); border-left:1px solid var(--line); padding:18px; overflow:auto; transform:translateX(105%); transition:transform .2s; z-index:20; box-shadow:-8px 0 30px #0008; }
+  #drawer.open { transform:none; }
+  #drawer h3 { margin:0 0 4px; }
+  #drawer .cap { color:var(--dim); white-space:pre-wrap; margin:8px 0; font-size:13px; }
+  #drawer .nums { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:10px 0; }
+  #drawer .nums div { background:var(--card2); border-radius:10px; padding:8px; text-align:center; }
+  #drawer .nums b { display:block; font-size:16px; }
+  #drawer .nums span { color:var(--dim); font-size:11px; }
+  a { color:var(--blue); }
+  .empty { padding:60px 20px; text-align:center; color:var(--dim); }
+  @media (max-width: 1000px) { .grid { grid-template-columns:1fr; } .cards { grid-template-columns:repeat(3,1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Reels Gözlemci – Analiz <small>v__VERSION__</small></h1>
+  <label style="color:var(--dim);font-size:13px"><input type="checkbox" id="live" checked> Canlı yenile</label>
+  <button id="bReload">Yenile</button>
+  <span id="upd" style="color:var(--dim);font-size:12px"></span>
+</header>
+
+<div class="wrap" id="app">
+  <div class="card">
+    <div class="filters">
+      <div><label for="fSession">Oturum</label><select id="fSession"></select></div>
+      <div><label for="fScn">Senaryo</label><select id="fScn"></select></div>
+      <div><label for="fAd">Reklam</label>
+        <select id="fAd"><option value="">Hepsi</option><option value="1">Sadece reklam</option><option value="0">Reklamsız</option></select></div>
+      <div style="flex:1;min-width:200px"><label for="fQ">Ara (hesap, etiket, müzik, açıklama)</label><input type="text" id="fQ" style="width:100%"></div>
+      <div><button id="bClear">Filtreleri temizle</button></div>
+    </div>
+    <div class="chips" id="chips" style="margin-top:10px"></div>
+  </div>
+
+  <div class="cards" id="stats"></div>
+
+  <div id="noData" class="card empty" style="display:none">Henüz veri yok. Ana pencerede <b>Başlat</b>'a basıp Reels'i izlet; veriler burada görünür.</div>
+
+  <div class="grid" id="charts">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Karşılaştırma</h2>
+        <div class="seg"><button id="cmpScn" class="on">Senaryoya göre</button><button id="cmpSes">Oturuma göre</button></div>
+      </div>
+      <div class="hint">Her grupta ortalama ekranda kalma süresi ve videonun ne kadarı izlendi.</div>
+      <div id="cCompare"></div>
+    </div>
+    <div class="card"><h2>Ekranda kalma dağılımı</h2><div class="hint">Kaç Reel'de ne kadar kaldın (sütunun üstüne gel).</div><div id="cHist"></div></div>
+    <div class="card"><h2>En çok çıkan hesaplar</h2><div class="hint">Tıkla: sadece o hesabı göster.</div><div id="cAcc"></div></div>
+    <div class="card"><h2>En çok çıkan etiketler</h2><div class="hint">Tıkla: sadece o etiketi göster.</div><div id="cTag"></div></div>
+    <div class="card"><h2>En çok çıkan müzikler</h2><div class="hint">Tıkla: sadece o müziği göster.</div><div id="cMus"></div></div>
+    <div class="card"><h2>Reklam / reklamsız</h2><div class="hint">Akışta reklam oranı.</div><div id="cAdPie"></div></div>
+    <div class="card"><h2>Kalma süresi akışı</h2><div class="hint">Her nokta bir izleme (sıraya göre). Çizgi: son 5 izlemenin ortalaması.</div><div id="cLine"></div></div>
+    <div class="card"><h2>Beğeni ↔ izlenen oran</h2><div class="hint">Her nokta bir izleme. Sağa: daha çok beğenilen. Yukarı: videonun daha çoğu izlendi. Noktaya tıkla: Reel kartı.</div><div id="cScatter"></div></div>
+  </div>
+
+  <div class="card" id="tableCard">
+    <h2>Tüm izlemeler <span id="tcount" style="color:var(--dim);font-weight:400"></span></h2>
+    <div class="hint">Sütun başlığına tıkla: sırala. Satıra tıkla: Reel kartı.</div>
+    <div style="overflow:auto"><table id="tbl"></table></div>
+  </div>
+</div>
+
+<aside id="drawer"></aside>
+<div id="tip"></div>
+
+<script>
+const TR = new Intl.NumberFormat("tr-TR");
+const SCN = { fixed: "Sabit aralık", skip: "Hemen kaydır", full: "Sonuna kadar izle", mix: "Karışık" };
+const COLORS = ["#ff8a3d", "#6aa8ff", "#4cc38a", "#f2b84b", "#c792ea", "#ef6a6a"];
+let DATA = { views: [], sessions: [] };
+const F = { session: "", scenario: "", ad: "", q: "", account: "", tag: "", music: "" };
+let COMPARE = "scenario";
+let SORT = { key: "id", dir: -1 };
+let lastSig = "";
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtN = n => n == null ? "–" : (n >= 1e6 ? (n / 1e6).toFixed(1).replace(".", ",") + " Mn" : n >= 1e4 ? (n / 1e3).toFixed(1).replace(".", ",") + " B" : TR.format(n));
+const fmtS = s => s == null || isNaN(s) ? "–" : (s >= 60 ? Math.floor(s / 60) + " dk " + Math.round(s % 60) + " sn" : s.toFixed(1).replace(".", ",") + " sn");
+const pct = x => x == null || isNaN(x) ? "–" : Math.round(x * 100) + "%";
+const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+const fracOf = v => v.duration ? Math.min(1, (v.watched || 0) / v.duration) : null;
+const tagsOf = v => (v.hashtags || "").split(/\s+/).filter(Boolean).map(t => t.toLowerCase());
+const nameOf = v => v.username ? "@" + v.username : v.code;
+
+// ------------------------------------------------------------ veri
+async function load(force) {
+  try {
+    const r = await fetch("/api/analysis"); const d = await r.json();
+    const sig = d.total + ":" + (d.views.length ? d.views[d.views.length - 1].id : 0);
+    if (!force && sig === lastSig) { $("upd").textContent = "Güncel · " + new Date().toLocaleTimeString("tr-TR"); return; }
+    lastSig = sig; DATA = d; fillSelects(); render();
+    $("upd").textContent = "Güncellendi · " + new Date().toLocaleTimeString("tr-TR");
+  } catch (e) { $("upd").textContent = "Program ile bağlantı yok"; }
+}
+
+function filtered() {
+  const q = F.q.trim().toLowerCase();
+  return DATA.views.filter(v => {
+    if (F.session && String(v.session_id) !== F.session) return false;
+    if (F.scenario && v.scenario !== F.scenario) return false;
+    if (F.ad !== "" && String(v.is_ad ? 1 : 0) !== F.ad) return false;
+    if (F.account && nameOf(v) !== F.account) return false;
+    if (F.tag && !tagsOf(v).includes(F.tag)) return false;
+    if (F.music && v.music !== F.music) return false;
+    if (q && !((v.username || "") + " " + (v.hashtags || "") + " " + (v.music || "") + " " + (v.caption || "")).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function fillSelects() {
+  const ses = $("fSession"), scn = $("fScn");
+  const keepS = F.session, keepC = F.scenario;
+  ses.innerHTML = '<option value="">Hepsi</option>' + DATA.sessions.map(s =>
+    `<option value="${s.id}">Oturum ${s.id} · ${esc((s.started || "").slice(5, 16))} · ${s.n} izleme</option>`).join("");
+  const scns = [...new Set(DATA.sessions.map(s => s.scenario).filter(Boolean))];
+  scn.innerHTML = '<option value="">Hepsi</option>' + scns.map(c => `<option value="${c}">${esc(SCN[c] || c)}</option>`).join("");
+  ses.value = keepS; scn.value = keepC;
+}
+
+// ------------------------------------------------------------ yardımcı çizimler
+const tip = $("tip");
+function showTip(e, text) { tip.textContent = text; tip.style.display = "block"; const x = Math.min(e.clientX + 14, innerWidth - 340); tip.style.left = x + "px"; tip.style.top = (e.clientY + 14) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+document.addEventListener("mousemove", e => { const t = e.target.closest && e.target.closest("[data-tip]"); if (t) showTip(e, t.dataset.tip); else hideTip(); });
+
+function topList(el, items, key, fmt) {
+  // items: [{label, n, tip}] sıralı; tıklanınca F[key] ayarlanır
+  if (!items.length) { el.innerHTML = '<div class="hint">Veri yok.</div>'; return; }
+  const max = Math.max(...items.map(i => i.n));
+  el.innerHTML = items.map(i => `<div class="row ${F[key] === i.label ? "act" : ""}" data-k="${esc(key)}" data-v="${esc(i.label)}" data-tip="${esc(i.tip)}">
+    <div class="lb">${esc(i.label)}</div><div class="tr"><i style="width:${Math.max(3, i.n / max * 100)}%"></i></div><div class="vl">${fmt ? fmt(i.n) : i.n}</div></div>`).join("");
+  el.querySelectorAll(".row").forEach(r => r.onclick = () => { const k = r.dataset.k, v = r.dataset.v; F[k] = F[k] === v ? "" : v; render(); });
+}
+
+function groupTop(rows, getKeys, n = 10) {
+  const m = new Map();
+  for (const v of rows) for (const k of getKeys(v)) {
+    if (!k) continue;
+    const g = m.get(k) || { label: k, n: 0, d: [], l: [] };
+    g.n++; g.d.push(v.dwell || 0); if (v.like_count != null) g.l.push(v.like_count);
+    m.set(k, g);
+  }
+  return [...m.values()].sort((a, b) => b.n - a.n).slice(0, n).map(g => ({
+    label: g.label, n: g.n,
+    tip: `${g.label}\n${g.n} kez çıktı\nort. kalma: ${fmtS(avg(g.d))}\nort. beğeni: ${fmtN(g.l.length ? Math.round(avg(g.l)) : null)}`
+  }));
+}
+
+function renderCompare(rows) {
+  const by = COMPARE === "scenario" ? v => v.scenario || "?" : v => "Oturum " + v.session_id;
+  const m = new Map();
+  for (const v of rows) { const k = by(v); (m.get(k) || m.set(k, []).get(k)).push(v); }
+  const groups = [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), "tr", { numeric: true }));
+  if (!groups.length) { $("cCompare").innerHTML = '<div class="hint">Veri yok.</div>'; return; }
+  const maxD = Math.max(1, ...groups.map(([, a]) => avg(a.map(v => v.dwell || 0))));
+  $("cCompare").innerHTML = groups.map(([k, a]) => {
+    const d = avg(a.map(v => v.dwell || 0)), fr = avg(a.map(fracOf).filter(x => x != null));
+    const name = COMPARE === "scenario" ? (SCN[k] || k) : k;
+    return `<div class="grp"><div class="gt">${esc(name)}<span>${a.length} izleme</span></div>
+      <div class="mini" data-tip="Ortalama ekranda kalma"><div>Ekranda kalma</div><div class="tr"><i style="width:${d / maxD * 100}%;background:var(--acc)"></i></div><div>${fmtS(d)}</div></div>
+      <div class="mini" data-tip="Videonun ortalama ne kadarı izlendi"><div>İzlenen oran</div><div class="tr"><i style="width:${(fr || 0) * 100}%;background:var(--acc2)"></i></div><div>${pct(fr)}</div></div></div>`;
+  }).join("");
+}
+
+function renderHist(rows) {
+  const bins = [[0, 1], [1, 2], [2, 3], [3, 5], [5, 8], [8, 12], [12, 20], [20, 1e9]];
+  const labels = ["0-1", "1-2", "2-3", "3-5", "5-8", "8-12", "12-20", "20+"];
+  const cnt = bins.map(([a, b]) => rows.filter(v => (v.dwell || 0) >= a && (v.dwell || 0) < b).length);
+  const max = Math.max(1, ...cnt);
+  $("cHist").innerHTML = '<div class="hist">' + cnt.map((c, i) => `<div class="col"><div class="n">${c}</div>
+    <div class="bar" style="height:${c / max * 100}%" data-tip="${labels[i]} sn arası kaldığın izleme: ${c} (%${rows.length ? Math.round(c / rows.length * 100) : 0})"></div><div class="x">${labels[i]}</div></div>`).join("") + "</div>";
+}
+
+function renderPie(rows) {
+  const ad = rows.filter(v => v.is_ad).length, org = rows.length - ad;
+  if (!rows.length) { $("cAdPie").innerHTML = '<div class="hint">Veri yok.</div>'; return; }
+  const r = 54, c = 2 * Math.PI * r, adLen = rows.length ? ad / rows.length * c : 0;
+  $("cAdPie").innerHTML = `<div style="display:flex;align-items:center;gap:24px"><svg width="150" height="150" viewBox="0 0 150 150">
+    <circle cx="75" cy="75" r="${r}" fill="none" stroke="#6aa8ff" stroke-width="22" data-tip="Reklamsız: ${org}"/>
+    <circle cx="75" cy="75" r="${r}" fill="none" stroke="#f2b84b" stroke-width="22" stroke-dasharray="${adLen} ${c}" transform="rotate(-90 75 75)" data-tip="Reklam: ${ad}"/>
+    <text x="75" y="80" text-anchor="middle" style="fill:var(--txt);font-size:20px;font-weight:600">${rows.length ? Math.round(ad / rows.length * 100) : 0}%</text></svg>
+    <div><div><span style="color:#f2b84b">●</span> Reklam: <b>${ad}</b></div><div><span style="color:#6aa8ff">●</span> Reklamsız: <b>${org}</b></div></div></div>`;
+}
+
+function renderLine(rows) {
+  const el = $("cLine");
+  if (rows.length < 2) { el.innerHTML = '<div class="hint">En az 2 izleme gerekir.</div>'; return; }
+  const W = 560, H = 190, L = 34, B = 22, T = 8, R = 8;
+  const ys = rows.map(v => v.dwell || 0), maxY = Math.max(2, ...ys);
+  const x = i => L + i / (rows.length - 1) * (W - L - R), y = v => H - B - v / maxY * (H - B - T);
+  const ma = ys.map((_, i) => avg(ys.slice(Math.max(0, i - 4), i + 1)));
+  const dots = rows.map((v, i) => `<circle cx="${x(i)}" cy="${y(ys[i])}" r="3" fill="${v.is_ad ? "#f2b84b" : "#6aa8ff"}" opacity=".75" data-tip="${esc(nameOf(v))}\n${fmtS(v.dwell)} kaldın\n${esc(v.music || "")}" data-code="${esc(v.code)}"/>`).join("");
+  const grid = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(maxY * f)}" y2="${y(maxY * f)}" stroke="#2c3038"/><text x="${L - 4}" y="${y(maxY * f) + 4}" text-anchor="end">${(maxY * f).toFixed(0)}</text>`).join("");
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%">${grid}<polyline fill="none" stroke="#ff8a3d" stroke-width="2.2" points="${ma.map((v, i) => x(i) + "," + y(v)).join(" ")}"/>${dots}
+    <text x="${W / 2}" y="${H - 4}" text-anchor="middle">izleme sırası →</text></svg>`;
+  el.querySelectorAll("circle[data-code]").forEach(c => c.onclick = () => openDrawer(c.dataset.code));
+}
+
+function renderScatter(rows) {
+  const el = $("cScatter");
+  const pts = rows.filter(v => v.like_count != null && fracOf(v) != null);
+  if (!pts.length) { el.innerHTML = '<div class="hint">Beğeni ve süre bilgisi olan izleme yok.</div>'; return; }
+  const W = 560, H = 220, L = 38, B = 26, T = 8, R = 10;
+  const lx = v => Math.log10(v + 1);
+  const minL = Math.max(0, Math.floor(Math.min(...pts.map(v => lx(v.like_count))))), maxL = Math.max(minL + 1, Math.ceil(Math.max(...pts.map(v => lx(v.like_count)))));
+  const x = v => L + (lx(v) - minL) / (maxL - minL) * (W - L - R), y = f => H - B - f * (H - B - T);
+  const tickTxt = t => t >= 1e6 ? (t / 1e6) + " Mn" : t >= 1e3 ? (t / 1e3) + " B" : String(t);
+  const ticks = []; for (let e = minL; e <= maxL; e++) ticks.push(Math.pow(10, e) - 1 < 0 ? 0 : Math.round(Math.pow(10, e)));
+  const gx = ticks.map(t => `<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H - B}" stroke="#2c3038"/><text x="${x(t)}" y="${H - 10}" text-anchor="middle">${tickTxt(t)}</text>`).join("");
+  const gy = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(f)}" y2="${y(f)}" stroke="#2c3038"/><text x="${L - 4}" y="${y(f) + 4}" text-anchor="end">${Math.round(f * 100)}%</text>`).join("");
+  const dots = pts.map(v => `<circle cx="${x(v.like_count)}" cy="${y(fracOf(v))}" r="4" fill="${v.is_ad ? "#f2b84b" : "#4cc38a"}" opacity=".7" data-code="${esc(v.code)}"
+    data-tip="${esc(nameOf(v))}\n❤ ${fmtN(v.like_count)}   izlenen: ${pct(fracOf(v))}\nkalma: ${fmtS(v.dwell)}"/>`).join("");
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%">${gx}${gy}${dots}<text x="${W / 2}" y="${H - 0}" text-anchor="middle" style="font-size:10px">beğeni sayısı (log ölçek)</text></svg>`;
+  el.querySelectorAll("circle[data-code]").forEach(c => c.onclick = () => openDrawer(c.dataset.code));
+}
+
+function renderStats(rows) {
+  const codes = new Set(rows.map(v => v.code));
+  const fr = rows.map(fracOf).filter(x => x != null);
+  const cells = [
+    [TR.format(rows.length), "izleme"], [TR.format(codes.size), "farklı Reel"], [fmtS(avg(rows.map(v => v.dwell || 0))), "ort. ekranda kalma"],
+    [pct(avg(fr)), "ort. izlenen oran"], [fmtS(rows.reduce((a, v) => a + (v.dwell || 0), 0)), "toplam süre"],
+    [rows.length ? Math.round(rows.filter(v => v.is_ad).length / rows.length * 100) + "%" : "–", "reklam oranı"]];
+  $("stats").innerHTML = cells.map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${s}</span></div>`).join("");
+}
+
+const COLS = [
+  ["id", "#", v => v.id, "num"], ["time", "Zaman", v => (v.time || "").slice(5, 16)], ["username", "Hesap", v => nameOf(v)],
+  ["music", "Müzik", v => v.music || ""], ["like_count", "Beğeni", v => fmtN(v.like_count), "num"], ["comment_count", "Yorum", v => fmtN(v.comment_count), "num"],
+  ["play_count", "İzlenme", v => fmtN(v.play_count), "num"], ["reshare_count", "Yen. paylaşım", v => fmtN(v.reshare_count), "num"], ["send_count", "Gönderme", v => fmtN(v.send_count), "num"],
+  ["dwell", "Kalma", v => fmtS(v.dwell), "num"], ["watched_frac", "İzlenen", v => pct(fracOf(v)), "num"], ["is_ad", "Reklam", v => v.is_ad ? '<span class="tag">reklam</span>' : "", "raw"],
+  ["scenario", "Senaryo", v => SCN[v.scenario] || v.scenario || ""], ["starred", "⭐/Not", v => (v.starred ? "⭐ " : "") + (v.note || "")]];
+
+function renderTable(rows) {
+  const key = SORT.key, dir = SORT.dir;
+  const sorted = [...rows].sort((a, b) => {
+    const x = key === "watched_frac" ? fracOf(a) : a[key], y = key === "watched_frac" ? fracOf(b) : b[key];
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "tr")) * dir;
+  });
+  const shown = sorted.slice(0, 400);
+  $("tcount").textContent = `(${rows.length}${rows.length > shown.length ? ", ilk 400 gösteriliyor" : ""})`;
+  $("tbl").innerHTML = "<thead><tr>" + COLS.map(c => `<th data-k="${c[0]}">${c[1]}${key === c[0] ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("") + "</tr></thead><tbody>" +
+    shown.map(v => `<tr class="rw" data-code="${esc(v.code)}">` + COLS.map(c => {
+      const cell = c[2](v); return `<td class="${c[3] === "num" ? "num" : ""}" title="${c[3] === "raw" ? "" : esc(String(cell).replace(/<[^>]*>/g, ""))}">${c[3] === "raw" ? cell : esc(cell)}</td>`;
+    }).join("") + "</tr>").join("") + "</tbody>";
+  $("tbl").querySelectorAll("th").forEach(th => th.onclick = () => { const k = th.dataset.k; SORT = { key: k, dir: SORT.key === k ? -SORT.dir : -1 }; renderTable(filtered()); });
+  $("tbl").querySelectorAll("tr.rw").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.code));
+}
+
+function renderChips() {
+  const items = [["account", "Hesap"], ["tag", "Etiket"], ["music", "Müzik"]].filter(([k]) => F[k]);
+  $("chips").innerHTML = items.map(([k, n]) => `<span class="chip" data-k="${k}" title="Kaldırmak için tıkla">${n}: ${esc(F[k])} ✕</span>`).join("");
+  $("chips").querySelectorAll(".chip").forEach(c => c.onclick = () => { F[c.dataset.k] = ""; render(); });
+}
+
+function openDrawer(code) {
+  const all = DATA.views.filter(v => v.code === code); if (!all.length) return;
+  const v = all[all.length - 1];
+  $("drawer").innerHTML = `<div style="display:flex;justify-content:space-between;align-items:start"><h3>${esc(nameOf(v))} ${v.is_ad ? '<span class="tag">reklam</span>' : ""}</h3><button id="dClose">Kapat ✕</button></div>
+    <div class="hint">${esc(v.music || "müzik bilgisi yok")}</div>
+    <div class="nums"><div><b>${fmtN(v.like_count)}</b><span>beğeni</span></div><div><b>${fmtN(v.comment_count)}</b><span>yorum</span></div><div><b>${fmtN(v.play_count)}</b><span>izlenme</span></div>
+      <div><b>${fmtN(v.reshare_count)}</b><span>yen. paylaşım</span></div><div><b>${fmtN(v.send_count)}</b><span>gönderme</span></div><div><b>${fmtS(v.duration)}</b><span>video süresi</span></div></div>
+    <div class="cap">${esc(v.caption || "(açıklama yok)")}</div>
+    ${v.hashtags ? `<div class="hint">${esc(v.hashtags)}</div>` : ""}
+    <div class="hint"><a href="https://www.instagram.com/reel/${encodeURIComponent(code)}/" target="_blank" rel="noopener">Instagram'da aç</a></div>
+    <h3 style="font-size:14px;margin-top:14px">Bu Reel'i ${all.length} kez izledin</h3>
+    ${all.map(a => `<div class="mini" style="grid-template-columns:90px 1fr 80px"><div>${esc((a.time || "").slice(5, 16))}</div><div class="tr"><i style="width:${(fracOf(a) || 0) * 100}%;background:var(--acc2)"></i></div><div>${fmtS(a.dwell)} · ${pct(fracOf(a))}</div></div>
+      ${a.note ? `<div class="hint">📝 ${esc(a.note)}</div>` : ""}`).join("")}`;
+  $("drawer").classList.add("open");
+  $("dClose").onclick = () => $("drawer").classList.remove("open");
+}
+
+function render() {
+  const rows = filtered();
+  const none = !DATA.views.length;
+  $("noData").style.display = none ? "" : "none";
+  $("charts").style.display = $("tableCard").style.display = $("stats").style.display = none ? "none" : "";
+  renderChips(); renderStats(rows); renderCompare(rows); renderHist(rows);
+  topList($("cAcc"), groupTop(rows, v => [nameOf(v)]), "account");
+  topList($("cTag"), groupTop(rows, v => tagsOf(v)), "tag");
+  topList($("cMus"), groupTop(rows, v => [v.music]), "music");
+  renderPie(rows); renderLine(rows); renderScatter(rows); renderTable(rows);
+}
+
+// ------------------------------------------------------------ olaylar
+$("fSession").onchange = e => { F.session = e.target.value; render(); };
+$("fScn").onchange = e => { F.scenario = e.target.value; render(); };
+$("fAd").onchange = e => { F.ad = e.target.value; render(); };
+let qt = null; $("fQ").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { F.q = e.target.value; render(); }, 200); };
+$("bClear").onclick = () => { Object.keys(F).forEach(k => F[k] = ""); $("fQ").value = ""; $("fSession").value = ""; $("fScn").value = ""; $("fAd").value = ""; render(); };
+$("bReload").onclick = () => load(true);
+$("cmpScn").onclick = () => { COMPARE = "scenario"; $("cmpScn").classList.add("on"); $("cmpSes").classList.remove("on"); renderCompare(filtered()); };
+$("cmpSes").onclick = () => { COMPARE = "session"; $("cmpSes").classList.add("on"); $("cmpScn").classList.remove("on"); renderCompare(filtered()); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("drawer").classList.remove("open"); });
+setInterval(() => { if ($("live").checked) load(false); }, 8000);
+load(true);
+</script>
+</body>
+</html>

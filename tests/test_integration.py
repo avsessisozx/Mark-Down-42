@@ -197,6 +197,24 @@ class AccountTests(EngineBase):
         self.assertIn("Hesap kaldırıldı", self.logs())
 
 
+class DataTests(EngineBase):
+    def test_first_reel_read_from_embedded_page_data(self):
+        self.run_until_done(self.settings(limit=2, min_s=1.5, max_s=1.8, start_url=self.base + "/reels/?embed=1"))
+        views = self.store.export_views()
+        self.assertEqual(len(views), 2)
+        self.assertEqual(views[0]["code"], fake.code_of(0))
+        self.assertEqual(views[0]["username"], "kisi0", "ilk Reel'in bilgisi gömülü veriden okunmalı")
+        logs = " ".join(e["text"] for e in self.engine.snapshot()["logs"])
+        self.assertIn("gömülü veriden", logs)
+
+    def test_send_and_repost_counts_collected(self):
+        self.run_until_done(self.settings(limit=3))
+        views = self.store.export_views()
+        self.assertEqual(views[1]["send_count"], 3)
+        self.assertEqual(views[2]["reshare_count"], 4)
+        self.assertEqual(views[2]["play_count"], 1000 + 2 * 53)
+
+
 class LoginPageTests(EngineBase):
     def test_logged_out_on_reels_goes_to_login_page(self):
         self.fake.logged_in = False
@@ -330,6 +348,103 @@ class ServerTests(EngineBase):
         self.assertTrue(self.post("/api/logout", {}, token=True)[1]["ok"])
         self.assertFalse((self.state.data_dir / "tarayici-chrome").exists())
         self.assertTrue((self.state.data_dir / "tarayici-bileseni").exists(), "indirilen tarayıcı bileşenine dokunulmamalı")
+
+    def test_analysis_endpoint_and_pages(self):
+        from tests import sample_data
+        sample_data.make(self.state.store, n_reels=30)
+        with urllib.request.urlopen(self.url + "/analiz", timeout=10) as r:
+            html = r.read().decode("utf-8")
+        self.assertIn("Reels Gözlemci – Analiz", html)
+        self.assertNotIn("__TOKEN__", html)
+        status, data = self.call("/api/analysis")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["total"], 320)
+        self.assertEqual(len(data["views"]), 320)
+        self.assertEqual(len(data["sessions"]), 4)
+        self.assertEqual({s["scenario"] for s in data["sessions"]}, {"fixed", "skip", "full", "mix"})
+        first = data["views"][0]
+        for key in ("id", "session_id", "scenario", "code", "username", "music", "dwell", "watched", "duration",
+                    "like_count", "play_count", "reshare_count", "send_count", "is_ad"):
+            self.assertIn(key, first)
+        self.assertEqual(len(self.call("/api/analysis?limit=25")[1]["views"]), 25)
+
+    def test_pick_folder_test_and_export_to_chosen_folder(self):
+        target = self.tmp / "benim klasörüm"
+        os.environ["REELS_GOZLEMCI_TEST_PICK"] = str(target)
+        try:
+            status, res, _ = self.post("/api/pick-folder", {}, token=True)
+        finally:
+            os.environ.pop("REELS_GOZLEMCI_TEST_PICK", None)
+        self.assertEqual((status, res["ok"], res["writable"]), (200, True, True))
+        self.assertEqual(self.state.settings["out_dir"], str(target))
+        self.assertTrue(self.post("/api/folder-test", {}, token=True)[1]["ok"])
+        from tests import sample_data
+        sample_data.make(self.state.store, n_reels=10)
+        status, res, _ = self.post("/api/export", {}, token=True)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["warning"], "")
+        self.assertTrue(Path(res["folder"]).is_relative_to(target))
+        self.assertTrue((Path(res["folder"]) / "reeller.csv").is_file())
+
+    def test_cancelled_pick_changes_nothing(self):
+        before = dict(self.state.settings)
+        res = self.post("/api/pick-folder", {}, token=True)[1]
+        self.assertEqual((res["ok"], res.get("cancelled")), (False, True))
+        self.assertEqual(self.state.settings["out_dir"], before["out_dir"])
+
+    def test_unwritable_folder_reports_exact_error_and_falls_back(self):
+        blocker = self.tmp / "dosya.txt"
+        blocker.write_text("x")
+        bad = str(blocker / "alt")
+        self.post("/api/settings", {"out_dir": bad}, token=True)
+        res = self.post("/api/folder-test", {}, token=True)[1]
+        self.assertFalse(res["ok"])
+        self.assertTrue(res["error"], "hatanın metni gösterilmeli")
+        from tests import sample_data
+        sample_data.make(self.state.store, n_reels=10)
+        status, res, _ = self.post("/api/export", {}, token=True)
+        self.assertEqual(status, 200)
+        self.assertTrue(res["ok"])
+        self.assertIn("yazılamadı", res["warning"])
+        self.assertTrue(Path(res["folder"]).is_relative_to(self.state.data_dir / "disa-aktarma"))
+        self.assertTrue((Path(res["folder"]) / "gorunumler.csv").is_file())
+
+    def test_live_write_while_running(self):
+        live_dir = self.tmp / "canli klasör"
+        self.post("/api/settings", {"out_dir": str(live_dir), "live_write": True, "scenario": "skip", "limit": 3,
+                                    "start_url": self.base + "/reels/"}, token=True)
+        self.assertTrue(self.post("/api/start", {}, token=True)[1]["ok"])
+        self.assertTrue(wait_for(lambda: not self.state.engine.running, 60))
+        path = live_dir / "canli-gorunumler.csv"
+        self.assertTrue(path.is_file())
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            import csv
+            rows = list(csv.DictReader(f, delimiter=";"))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["username"], "kisi0")
+        self.assertEqual(rows[0]["scenario"], "skip")
+        snap = self.call("/api/state")[1]
+        self.assertEqual(snap["live"]["written"], 3)
+        self.assertEqual(snap["live"]["error"], "")
+
+    def test_live_write_off_writes_nothing(self):
+        live_dir = self.tmp / "kapali"
+        self.post("/api/settings", {"out_dir": str(live_dir), "live_write": False, "scenario": "skip", "limit": 2,
+                                    "start_url": self.base + "/reels/"}, token=True)
+        self.post("/api/start", {}, token=True)
+        self.assertTrue(wait_for(lambda: not self.state.engine.running, 60))
+        self.assertFalse((live_dir / "canli-gorunumler.csv").exists())
+
+    def test_report_lists_counter_fields_and_folder(self):
+        self.post("/api/settings", {"scenario": "skip", "limit": 2, "start_url": self.base + "/reels/",
+                                    "out_dir": str(self.tmp / "r")}, token=True)
+        self.post("/api/start", {}, token=True)
+        self.assertTrue(wait_for(lambda: not self.state.engine.running, 60))
+        text = self.call("/api/report")[1]["text"]
+        self.assertIn("Ham kayıttaki sayaç alanları", text)
+        self.assertIn("send_count", text)
+        self.assertIn("play_count", text)
+        self.assertIn("out_dir:", text)
 
     def test_api_flow(self):
         with urllib.request.urlopen(self.url + "/", timeout=10) as r:

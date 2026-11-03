@@ -6,7 +6,7 @@ Gerçek Reels sayfasının test edilebilen davranışlarını taklit eder:
   * ArrowDown ya da fare tekerleği ile sonraki Reel'e geçilir
   * Reel bilgisi sayfanın kendi POST /api/graphql isteğiyle 10'ar 10'ar gelir (gerçek biçime benzer iç içe yapı)
   * <video> süresi 4 sn; geçerli videonun currentTime'ı ilerler, 4 sn'de başa sarar
-Sorgu parametreleri: anon=1 (girişsiz de Reels sayfasını gösterir, gerçek Instagram'ın girişsiz Reel görünümü gibi), nokey=1 (klavye çalışmaz, yalnız tekerlek), nourl=1 (adres değişmez; kod sayfadaki bağlantıdan okunur)
+Sorgu parametreleri: embed=1 (ilk Reel'in bilgisi sayfaya gömülü, toplu yanıtta yok), anon=1 (girişsiz de Reels sayfasını gösterir, gerçek Instagram'ın girişsiz Reel görünümü gibi), nokey=1 (klavye çalışmaz, yalnız tekerlek), nourl=1 (adres değişmez; kod sayfadaki bağlantıdan okunur)
 Elle çalıştırmak için: python -m tests.fake_instagram --port 8765
 """
 
@@ -35,7 +35,7 @@ def media_of(i: int) -> dict:
         "taken_at": 1762000000 + i * 60, "media_type": 2,
         "user": {"username": f"kisi{i % 5}", "full_name": f"Kişi {i % 5}", "pk": str(900 + i % 5)},
         "caption": {"text": f"Deneme Reel {i} #deneme #etiket{i % 3}"},
-        "like_count": 100 + i * 7, "comment_count": i, "play_count": 1000 + i * 53, "reshare_count": i * 2,
+        "like_count": 100 + i * 7, "comment_count": i, "play_count": 1000 + i * 53, "reshare_count": i * 2, "send_count": i * 3,
         "video_duration": DURATION, "has_liked": False,
         "clips_metadata": {"music_info": {"music_asset_info": {"title": "Şarkı", "display_artist": "Sanatçı"}}},
         "video_versions": [{"url": "http://x/y.mp4", "width": 720, "height": 1280}],
@@ -45,8 +45,8 @@ def media_of(i: int) -> dict:
     return m
 
 
-def batch_payload(k: int) -> dict:
-    edges = [{"node": {"media": media_of(i)}} for i in range(k * BATCH, min(TOTAL, (k + 1) * BATCH))]
+def batch_payload(k: int, skip0: bool = False) -> dict:
+    edges = [{"node": {"media": media_of(i)}} for i in range(k * BATCH, min(TOTAL, (k + 1) * BATCH)) if not (skip0 and i == 0)]
     return {"data": {"xdt_api__v1_clips__home__connection_v2": {"edges": edges, "page_info": {"has_next_page": True}}},
             "extensions": {"is_final": True}}
 
@@ -62,9 +62,10 @@ REELS_HTML = """<!doctype html><meta charset=utf-8><title>Reels</title>
  a.u{position:absolute;left:20px;bottom:20px;color:#8cf}
 </style>
 <body>
+__EMBED__
 __SECTIONS__
 <script>
-const Q = new URLSearchParams(location.search), NOURL = Q.has('nourl'), NOKEY = Q.has('nokey');
+const Q = new URLSearchParams(location.search), NOURL = Q.has('nourl'), NOKEY = Q.has('nokey'), EMBED = Q.has('embed');
 const CODES = __CODES__, DUR = __DUR__;
 let active = -1, activeSince = performance.now(), loadedBatches = 0, loading = false;
 const vids = [...document.querySelectorAll('video')];
@@ -77,7 +78,7 @@ vids.forEach((v, i) => {
 async function loadBatch() {
   if (loading || loadedBatches * 10 >= CODES.length) return;
   loading = true;
-  await fetch('/api/graphql', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'batch=' + loadedBatches});
+  await fetch('/api/graphql', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'batch=' + loadedBatches + (EMBED ? '&skip0=1' : '')});
   loadedBatches++; loading = false;
 }
 const io = new IntersectionObserver(es => {
@@ -151,7 +152,11 @@ def make_handler(state: FakeState):
                 sections = "\n".join(
                     f'<section data-i="{i}"><video muted playsinline></video>'
                     f'<a class="u" href="/reel/{code_of(i)}/">@kisi{i % 5}</a></section>' for i in range(TOTAL))
-                html = (REELS_HTML.replace("__SECTIONS__", sections)
+                embed = ""
+                if "embed=1" in u.query:     # ilk Reel'in bilgisi sayfaya gömülü gelir (gerçek Instagram'da da böyle olabiliyor)
+                    embed = ('<script type="application/json" id="boot">'
+                             + json.dumps({"require": [["x", {"media": media_of(0)}]]}) + "</script>")
+                html = (REELS_HTML.replace("__EMBED__", embed).replace("__SECTIONS__", sections)
                         .replace("__CODES__", json.dumps([code_of(i) for i in range(TOTAL)]))
                         .replace("__DUR__", str(DURATION)))
                 return self._send(200, html, headers=headers)
@@ -164,8 +169,9 @@ def make_handler(state: FakeState):
             with state.lock:
                 state.requests.append(("POST", self.path))
             if u.path == "/api/graphql":
-                k = int(parse_qs(body).get("batch", ["0"])[0])
-                return self._send(200, json.dumps(batch_payload(k)), "application/json")
+                q = parse_qs(body)
+                k = int(q.get("batch", ["0"])[0])
+                return self._send(200, json.dumps(batch_payload(k, skip0="skip0" in q)), "application/json")
             self._send(404, "yok", "text/plain")
 
     return H

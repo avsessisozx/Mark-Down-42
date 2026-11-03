@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS sessions(
   app_version TEXT, browser TEXT);
 CREATE TABLE IF NOT EXISTS reels(
   code TEXT PRIMARY KEY, pk TEXT, username TEXT, full_name TEXT, caption TEXT, hashtags TEXT,
-  like_count INTEGER, comment_count INTEGER, play_count INTEGER, reshare_count INTEGER,
+  like_count INTEGER, comment_count INTEGER, play_count INTEGER, reshare_count INTEGER, send_count INTEGER,
   like_first INTEGER, comment_first INTEGER, play_first INTEGER,
   duration REAL, music TEXT, product_type TEXT, taken_at INTEGER, is_ad INTEGER, has_liked INTEGER,
   likes_hidden INTEGER, location TEXT, first_seen REAL, last_seen REAL, raw BLOB);
@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS views_session ON views(session_id);
 """
 
 _UPDATE_FIELDS = ("pk", "username", "full_name", "caption", "hashtags", "like_count", "comment_count",
-                  "play_count", "reshare_count", "duration", "music", "product_type", "taken_at",
+                  "play_count", "reshare_count", "send_count", "duration", "music", "product_type", "taken_at",
                   "has_liked", "location")
 
 
@@ -45,6 +45,9 @@ class Store:
         self.db.row_factory = sqlite3.Row
         with self._lock:
             self.db.executescript(SCHEMA)
+            cols = {r["name"] for r in self.db.execute("PRAGMA table_info(reels)")}
+            if "send_count" not in cols:                      # 0.2.x veritabanını yükselt
+                self.db.execute("ALTER TABLE reels ADD COLUMN send_count INTEGER")
             self.db.commit()
 
     def close(self) -> None:
@@ -77,11 +80,11 @@ class Store:
             if row is None:
                 self.db.execute(
                     "INSERT INTO reels(code, pk, username, full_name, caption, hashtags, like_count, comment_count,"
-                    " play_count, reshare_count, like_first, comment_first, play_first, duration, music, product_type,"
-                    " taken_at, is_ad, has_liked, likes_hidden, location, first_seen, last_seen, raw)"
-                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " play_count, reshare_count, send_count, like_first, comment_first, play_first, duration, music,"
+                    " product_type, taken_at, is_ad, has_liked, likes_hidden, location, first_seen, last_seen, raw)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (rec["code"], rec["pk"], rec["username"], rec["full_name"], rec["caption"], rec["hashtags"],
-                     rec["like_count"], rec["comment_count"], rec["play_count"], rec["reshare_count"],
+                     rec["like_count"], rec["comment_count"], rec["play_count"], rec["reshare_count"], rec.get("send_count"),
                      rec["like_count"], rec["comment_count"], rec["play_count"], rec["duration"], rec["music"],
                      rec["product_type"], rec["taken_at"], rec["is_ad"], rec["has_liked"], rec["likes_hidden"],
                      rec["location"], now, now, rec["raw"]))
@@ -106,8 +109,35 @@ class Store:
         with self._lock:
             row = self.db.execute(
                 "SELECT code, username, caption, hashtags, like_count, comment_count, play_count, reshare_count,"
-                " duration, music, is_ad, has_liked, taken_at FROM reels WHERE code=?", (code,)).fetchone()
+                " send_count, duration, music, is_ad, has_liked, taken_at FROM reels WHERE code=?", (code,)).fetchone()
         return dict(row) if row else None
+
+    def set_duration_if_missing(self, code: str, duration: float) -> None:
+        """Instagram yanıtında süre yoksa videonun kendi süresini kaydeder."""
+        with self._lock:
+            self.db.execute("UPDATE reels SET duration=? WHERE code=? AND (duration IS NULL OR duration<=0)",
+                            (float(duration), code))
+            self.db.commit()
+
+    def numeric_fields_summary(self, limit_rows: int = 400, max_lines: int = 90) -> List[str]:
+        """Ham kayıtlardaki sayaç benzeri alanlar: "yol: görülme sayısı, örnek değerler". İzlenme/paylaşım/gönderme
+        sayılarının Instagram'daki gerçek alan adını bulmak için rapora yazılır."""
+        from . import extract
+        with self._lock:
+            rows = self.db.execute("SELECT raw FROM reels ORDER BY last_seen DESC LIMIT ?", (limit_rows,)).fetchall()
+        seen: Dict[str, List[Any]] = {}
+        for r in rows:
+            try:
+                doc = json.loads(zlib.decompress(r["raw"]).decode("utf-8"))
+            except Exception:
+                continue
+            for path, value in extract.numeric_fields(doc):
+                seen.setdefault(path, []).append(value)
+        lines = []
+        for path, vals in sorted(seen.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:max_lines]:
+            ex = ", ".join(str(v) for v in vals[:3])
+            lines.append(f"{path}: {len(vals)}/{len(rows)} Reel'de, örnek: {ex}")
+        return lines
 
     def count_reels(self) -> int:
         with self._lock:
@@ -132,18 +162,26 @@ class Store:
                 (session_id, n)).fetchall()
         return [dict(r) for r in rows]
 
+    def sessions(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self.db.execute(
+                "SELECT s.id, s.started, s.ended, s.scenario, s.browser, (SELECT COUNT(*) FROM views v WHERE v.session_id=s.id) AS n"
+                " FROM sessions s ORDER BY s.id").fetchall()
+        return [dict(r) for r in rows]
+
     def views_total(self) -> int:
         with self._lock:
             return int(self.db.execute("SELECT COUNT(*) FROM views").fetchone()[0])
 
     # ---------------------------------------------------------------- dışa aktarma
-    def export_views(self) -> List[Dict[str, Any]]:
+    def export_views(self, after_id: int = 0) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self.db.execute(
-                "SELECT v.session_id, v.seq, v.t_start, v.t_end, v.dwell, v.watched, v.duration, v.loops, v.action,"
-                " v.starred, v.note, v.code, r.username, r.caption, r.hashtags, r.music, r.like_count, r.comment_count,"
-                " r.play_count, r.reshare_count, r.is_ad, r.has_liked, r.taken_at FROM views v"
-                " LEFT JOIN reels r ON r.code=v.code ORDER BY v.id").fetchall()
+                "SELECT v.id, v.session_id, s.scenario, v.seq, v.t_start, v.t_end, v.dwell, v.watched, v.duration,"
+                " v.loops, v.action, v.starred, v.note, v.code, r.username, r.caption, r.hashtags, r.music,"
+                " r.like_count, r.comment_count, r.play_count, r.reshare_count, r.send_count, r.is_ad, r.has_liked,"
+                " r.taken_at FROM views v LEFT JOIN reels r ON r.code=v.code"
+                " LEFT JOIN sessions s ON s.id=v.session_id WHERE v.id>? ORDER BY v.id", (after_id,)).fetchall()
         out = []
         for r in rows:
             d = dict(r)

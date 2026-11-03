@@ -34,11 +34,15 @@ def build(settings: Dict[str, Any], snap: Dict[str, Any]) -> str:
     out.append(json.dumps(s, ensure_ascii=False))
     out.append("\n--- Durum ---")
     for k in ("phase", "message", "logged_in", "auto", "paused", "views", "reels_known", "responses_seen",
-              "responses_with_media", "scroll_fail", "current_code", "url"):
+              "responses_with_media", "scroll_fail", "current_code", "url", "out_dir", "live"):
         out.append(f"{k}: {snap.get(k)}")
     cur = snap.get("current") or {}
     if cur:
         out.append("current: " + json.dumps(cur, ensure_ascii=False))
+    fields = snap.get("numeric_fields") or []
+    if fields:
+        out.append(f"\n--- Ham kayıttaki sayaç alanları ({len(fields)} satır; izlenme/paylaşım/gönderme adını bulmak için) ---")
+        out.extend(fields)
     logs = [f"{e.get('t', '')} [{e.get('level', '')}] {str(e.get('text', '')).replace(chr(10), ' ')}"
             for e in (snap.get("logs") or [])]
     out.append(f"\n--- Günlük ({len(logs)} satır) ---")

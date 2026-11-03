@@ -50,11 +50,25 @@
   pre .warn { color:var(--warn); } pre .error { color:var(--bad); } pre .ok { color:var(--ok); }
   summary { cursor:pointer; color:var(--dim); }
   .small { font-size:12px; color:var(--dim); }
+  .tabs { display:flex; gap:6px; }
+  .tabs button { flex:1; padding:8px; border-radius:10px; }
+  .tabs button.on { background:var(--acc); color:#1b1206; border-color:var(--acc); font-weight:600; }
+  .nums.five { grid-template-columns:repeat(5,1fr); }
+  .nums.five b { font-size:13px; }
+  .music { color:var(--acc); font-size:12px; margin:0 0 6px; }
+  .err { color:var(--bad); font-size:12px; margin-top:6px; word-break:break-word; }
+  .okm { color:var(--ok); font-size:12px; margin-top:6px; word-break:break-word; }
+  .list .it { padding:6px 2px; border-bottom:1px solid var(--line); font-size:13px; }
+  .list .it .m { color:var(--dim); font-size:11px; }
+  .path { background:#262a31; border-radius:8px; padding:7px 9px; font:12px Consolas,monospace; word-break:break-all; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Reels Gözlemci <small>v__VERSION__</small></h1>
+  <div class="tabs"><button id="tabWatch" class="on">İzle</button><button id="tabData">Veriler</button></div>
+
+  <div id="viewWatch" style="display:flex;flex-direction:column;gap:10px">
 
   <div class="card" id="accCard">
     <div class="status"><span id="accDot" class="dot"></span><div><div id="accTitle" style="font-weight:600">Hesap: yok</div><div id="accMsg" class="msg"></div></div></div>
@@ -92,11 +106,13 @@
     <div id="curBox" style="display:none">
       <div class="user"><span id="cUser">-</span><span id="cAd" class="ad" style="display:none">REKLAM</span></div>
       <div id="cCap" class="cap"></div>
-      <div class="nums">
+      <div id="cMusic" class="music"></div>
+      <div class="nums five">
         <div><b id="nLike">-</b><span>beğeni</span></div>
         <div><b id="nCom">-</b><span>yorum</span></div>
         <div><b id="nPlay">-</b><span>izlenme</span></div>
-        <div><b id="nShare">-</b><span>paylaşım</span></div>
+        <div><b id="nShare">-</b><span>yen. paylaşım</span></div>
+        <div><b id="nSend">-</b><span>gönderme</span></div>
       </div>
       <div class="lbl" style="margin-top:10px"><span>Ekranda kalma</span><span id="tDwell">0 sn</span></div>
       <div class="bar"><i id="bDwell"></i></div>
@@ -141,12 +157,34 @@
     <table id="recent"></table>
   </div>
 
-  <div class="card">
-    <div class="row">
-      <button id="bExport">Dışa aktar (CSV+JSON)</button>
-      <button id="bFolder">Klasörü aç</button>
+  </div>
+
+  <div id="viewData" style="display:none;flex-direction:column;gap:10px">
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">Veri klasörü</div>
+      <div class="path" id="dirPath">-</div>
+      <div class="row" style="margin-top:8px">
+        <button id="bPick" class="pri">Klasör seç…</button>
+        <button id="bTest">Klasörü dene</button>
+        <button id="bFolder">Aç</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="liveWrite"> Her izlemeyi bu klasöre hemen yaz (canli-gorunumler.csv)</label>
+      <div id="dirMsg" class="small" style="margin-top:6px"></div>
     </div>
-    <div class="small" id="expInfo" style="margin-top:6px"></div>
+
+    <div class="card">
+      <div class="row">
+        <button id="bExport">Dışa aktar (CSV+JSON)</button>
+        <button id="bAnaliz" class="pri">Analiz penceresini aç</button>
+      </div>
+      <div class="small" id="expInfo" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b>Toplanan Reel'ler</b><span class="small" id="dataCount"></span></div>
+      <input type="text" id="dataQ" placeholder="Ara (hesap, müzik, etiket)…" style="margin-top:8px">
+      <div class="list" id="dataList" style="margin-top:6px"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -211,8 +249,53 @@ $("bStop").onclick = async () => { await api("/api/stop", {}); };
 $("bStar").onclick = async () => { await api("/api/star", {}); };
 $("bNote").onclick = async () => { const t = $("noteIn").value.trim(); if (t) { await api("/api/note", { text: t }); $("noteIn").value = ""; } };
 $("noteIn").addEventListener("keydown", e => { if (e.key === "Enter") $("bNote").click(); });
-$("bExport").onclick = async () => { $("expInfo").textContent = "Yazılıyor…"; const r = await api("/api/export", {}); $("expInfo").textContent = r.ok ? "Kaydedildi: " + r.folder : "Hata: " + (r.error || ""); };
-$("bFolder").onclick = async () => { const r = await api("/api/open-folder", {}); if (r.folder) $("expInfo").textContent = r.folder; };
+function setMsg(el, text, kind) { el.textContent = text; el.className = (kind === "err" ? "err" : kind === "ok" ? "okm" : "small"); }
+$("bExport").onclick = async () => {
+  setMsg($("expInfo"), "Yazılıyor…");
+  const r = await api("/api/export", {});
+  if (!r.ok) return setMsg($("expInfo"), r.error || "Dışa aktarılamadı.", "err");
+  setMsg($("expInfo"), (r.warning ? r.warning + "\n" : "") + "Kaydedildi: " + r.folder, r.warning ? "err" : "ok");
+};
+$("bFolder").onclick = async () => { const r = await api("/api/open-folder", {}); if (r.folder) setMsg($("dirMsg"), (r.warning || "Klasör: " + r.folder), r.warning ? "err" : "ok"); };
+$("bPick").onclick = async () => {
+  setMsg($("dirMsg"), "Klasör seçme penceresi açılıyor (diğer pencerelerin arkasında kalmış olabilir)…");
+  const r = await api("/api/pick-folder", {});
+  if (r.cancelled) return setMsg($("dirMsg"), "Seçim iptal edildi.");
+  if (!r.ok) return setMsg($("dirMsg"), "Klasör seçilemedi.", "err");
+  settingsLoaded = true;
+  setMsg($("dirMsg"), r.writable ? "Seçildi: " + r.folder : "Seçildi ama yazılamıyor: " + r.error, r.writable ? "ok" : "err");
+};
+$("bTest").onclick = async () => {
+  const r = await api("/api/folder-test", {});
+  setMsg($("dirMsg"), r.ok ? "Yazılabiliyor ✓ " + r.folder : "Yazılamıyor: " + r.folder + "\nHata: " + r.error, r.ok ? "ok" : "err");
+};
+$("liveWrite").onchange = () => api("/api/settings", { live_write: $("liveWrite").checked });
+$("bAnaliz").onclick = () => { window.open("/analiz", "reels-analiz", "width=1280,height=860"); };
+
+let view = "watch";
+function showView(v) {
+  view = v;
+  $("viewWatch").style.display = v === "watch" ? "flex" : "none";
+  $("viewData").style.display = v === "data" ? "flex" : "none";
+  $("tabWatch").classList.toggle("on", v === "watch"); $("tabData").classList.toggle("on", v === "data");
+  if (v === "data") loadData();
+}
+$("tabWatch").onclick = () => showView("watch"); $("tabData").onclick = () => showView("data");
+let dataRows = [];
+async function loadData() {
+  try { const d = await api("/api/analysis?limit=150"); dataRows = d.views.slice().reverse(); $("dataCount").textContent = d.total + " kayıt"; renderData(); } catch (e) { /* sonraki turda */ }
+}
+function renderData() {
+  const q = $("dataQ").value.trim().toLowerCase();
+  const rows = dataRows.filter(v => !q || ((v.username || "") + " " + (v.hashtags || "") + " " + (v.music || "")).toLowerCase().includes(q)).slice(0, 80);
+  $("dataList").innerHTML = rows.length ? rows.map(v => {
+    const frac = v.duration ? Math.round(Math.min(1, (v.watched || 0) / v.duration) * 100) + "%" : "-";
+    return `<div class="it"><b>${v.username ? "@" + v.username : v.code}</b>${v.is_ad ? ' <span class="tag o">reklam</span>' : ""}${v.starred ? " ⭐" : ""}
+      <span class="m"> · ${(v.dwell || 0).toFixed(1)} sn · izlenen ${frac}</span><div class="m">♪ ${v.music || "müzik bilgisi yok"} · ❤ ${fmt(v.like_count)} · 💬 ${fmt(v.comment_count)} · ▶ ${fmt(v.play_count)}</div></div>`;
+  }).join("") : '<div class="small">Henüz kayıt yok.</div>';
+}
+$("dataQ").oninput = renderData;
+setInterval(() => { if (view === "data") loadData(); }, 5000);
 $("bReport").onclick = async () => {
   const r = await api("/api/report-copy", {});
   try { if (!r.ok) await navigator.clipboard.writeText(r.text); $("bReport").textContent = "Kopyalandı ✓"; }
@@ -244,6 +327,8 @@ function render(s) {
     $("cUser").textContent = c.username ? "@" + c.username : (c.known ? "-" : "(bilgi bekleniyor…)");
     $("cAd").style.display = c.is_ad ? "" : "none";
     $("cCap").textContent = c.caption || "";
+    $("cMusic").textContent = c.music ? "♪ " + c.music : "";
+    $("nSend").textContent = fmt(c.sends);
     $("nLike").textContent = fmt(c.likes); $("nCom").textContent = fmt(c.comments); $("nPlay").textContent = fmt(c.plays); $("nShare").textContent = fmt(c.shares);
     const dwell = c.dwell || 0, watched = c.watched || 0, dur = c.duration || 0;
     const target = s.next_in !== null && s.next_in !== undefined ? dwell + s.next_in : Math.max(dwell, dur || 10);
@@ -253,6 +338,11 @@ function render(s) {
     $("bWatch").style.width = Math.min(100, dur ? watched / dur * 100 : 0) + "%";
     $("bStar").textContent = c.starred ? "⭐ İşaretli (kaldır)" : "⭐ İşaretle";
   }
+  if (s.settings) {
+    $("dirPath").textContent = s.settings.out_dir || s.default_out_dir || "-";
+    if (document.activeElement !== $("liveWrite")) $("liveWrite").checked = !!s.settings.live_write;
+  }
+  if (s.live && s.live.error && !$("dirMsg").dataset.keep) { /* hata günlükte ve Klasörü dene ile görülür */ }
   $("sViews").textContent = s.views; $("sKnown").textContent = s.reels_known;
   $("recent").innerHTML = (s.recent || []).map(r => {
     const pct = r.duration ? Math.round(Math.min(1, (r.watched || 0) / r.duration) * 100) + "%" : "-";

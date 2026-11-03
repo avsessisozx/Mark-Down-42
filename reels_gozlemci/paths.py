@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 SCENARIOS = ("fixed", "skip", "full", "mix")
 
@@ -18,7 +18,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "auto": True,            # kendisi kaydırsın mı
     "limit": 0,              # bu kadar Reel'den sonra dur (0 = sınırsız)
     "start_url": "https://www.instagram.com/reels/",
-    "out_dir": "",
+    "out_dir": "",           # verilerin yazılacağı klasör (boş = Belgelerim\\Reels Gozlemci)
+    "live_write": True,      # her izlemeyi seçili klasördeki canli-gorunumler.csv dosyasına hemen yaz
 }
 
 
@@ -34,8 +35,56 @@ def app_data_dir() -> Path:
     return base
 
 
+def _known_folder(data1: int, data2: int, data3: int, data4: tuple) -> Optional[Path]:
+    """Windows'un gerçek özel klasörü (Belgeler başka sürücüye/OneDrive'a taşınmış olsa bile)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
+                        ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_ubyte * 8)]
+
+        guid = GUID(data1, data2, data3, (ctypes.c_ubyte * 8)(*data4))
+        ptr = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(ptr)) == 0:
+            value = ptr.value
+            ctypes.windll.ole32.CoTaskMemFree(ptr)
+            if value:
+                return Path(value)
+    except Exception:
+        pass
+    return None
+
+
+def documents_dir() -> Path:
+    # FOLDERID_Documents = {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
+    found = _known_folder(0xFDD39AD0, 0x238F, 0x46AF, (0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7))
+    return found or Path.home() / "Documents"
+
+
 def default_export_dir() -> Path:
-    return Path.home() / "Documents" / "Reels Gozlemci"
+    return documents_dir() / "Reels Gozlemci"
+
+
+def fallback_export_dir() -> Path:
+    """Seçilen klasöre yazılamazsa kullanılan, her zaman yazılabilen yedek klasör."""
+    return app_data_dir() / "disa-aktarma"
+
+
+def check_writable(folder: Path) -> Optional[str]:
+    """Klasör oluşturulup içine dosya yazılabiliyor mu? Sorun yoksa None, varsa hatanın metni."""
+    import uuid
+    try:
+        folder = Path(folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        probe = folder / f".yazma-denemesi-{uuid.uuid4().hex[:8]}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return None
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
 
 
 def settings_path() -> Path:
@@ -67,7 +116,8 @@ def clean_settings(raw: Dict[str, Any]) -> Dict[str, Any]:
     s["limit"] = int(_num(s["limit"], 0, 0, 100000))
     if not isinstance(s["start_url"], str) or not s["start_url"].startswith(("http://", "https://")):
         s["start_url"] = DEFAULT_SETTINGS["start_url"]
-    s["out_dir"] = s["out_dir"] if isinstance(s["out_dir"], str) else ""
+    s["out_dir"] = s["out_dir"].strip() if isinstance(s["out_dir"], str) else ""
+    s["live_write"] = bool(s["live_write"])
     return s
 
 

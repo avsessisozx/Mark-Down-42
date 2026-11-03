@@ -111,6 +111,12 @@ def self_test() -> str:
         with urllib.request.urlopen(f"http://127.0.0.1:{state.port}/", timeout=5) as resp:
             html = resp.read().decode("utf-8")
         assert "Reels Gözlemci" in html and state.token in html, "UI did not load"
+        with urllib.request.urlopen(f"http://127.0.0.1:{state.port}/analiz", timeout=5) as resp:
+            assert "Analiz" in resp.read().decode("utf-8"), "analysis page did not load"
+        with urllib.request.urlopen(f"http://127.0.0.1:{state.port}/api/analysis", timeout=5) as resp:
+            assert "views" in json.loads(resp.read().decode("utf-8")), "analysis api broken"
+        from .paths import check_writable, documents_dir
+        assert documents_dir(), "documents dir not found"
         with urllib.request.urlopen(f"http://127.0.0.1:{state.port}/api/state", timeout=5) as resp:
             snap = json.loads(resp.read().decode("utf-8"))
         assert snap.get("phase") == "hazir", "state not ready"
@@ -123,7 +129,7 @@ def self_test() -> str:
     finally:
         server.shutdown()
         state.store.close()
-    say("SELF-TEST OK: ui + state + extractor")
+    say("SELF-TEST OK: ui + analysis + state + extractor")
     return "ui"
 
 
