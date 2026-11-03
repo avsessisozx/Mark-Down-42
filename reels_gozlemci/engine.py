@@ -103,6 +103,10 @@ class Engine:
         self._stop = threading.Event()
         self._finished_at = 0.0
         self._limit_reached = False
+        self._last_logged_url = ""
+        self._login_page_shown = False
+        self._cookie_names_logged = False
+        self._quiet_responses = 0
 
     # ------------------------------------------------------------------ dışarıya
     @property
@@ -148,6 +152,10 @@ class Engine:
             self.paused = False
             self.views = 0
             self._limit_reached = False
+            self._login_page_shown = False
+            self._cookie_names_logged = False
+            self._quiet_responses = 0
+            self._last_logged_url = ""
             self._seq = 0
             self.scroll_fail = 0
             self.phase, self.message = "tarayici", "Tarayıcı açılıyor…"
@@ -186,6 +194,7 @@ class Engine:
         self._pw = await async_playwright().start()
         self.context = None
         self.page = None
+        closed_by_user = False
         try:
             await self._launch()
             self.session_id = self.store.start_session(
@@ -194,7 +203,9 @@ class Engine:
             self.log("info", f"Oturum {self.session_id} başladı ({self.browser_name}).")
             await self._loop()
         except BrowserGone:
-            self.log("warn", "Tarayıcı penceresi kapatıldı.")
+            self.log("warn", f"Tarayıcı penceresi kapatıldı (son adres: {urlsplit(self.page_url).path[:60] or '-'}, "
+                             f"giriş: {'var' if self.logged_in else 'yok'}).")
+            closed_by_user = True
         finally:
             await self._close_view("elle")
             if self.session_id:
@@ -202,7 +213,8 @@ class Engine:
             await self._shutdown()
             if self.phase != "hata":
                 self.phase = "bitti"
-                self.message = f"Bitti: {self.views} izleme kaydedildi."
+                self.message = (("Tarayıcı penceresi kapandı. " if closed_by_user else "")
+                                + f"{self.views} izleme kaydedildi.")
 
     # ------------------------------------------------------------------ tarayıcı
     def _channels(self) -> List[str]:
@@ -313,6 +325,9 @@ class Engine:
             self.log("debug", f"yanıt çözülemedi: {exc}")
             return
         if not records:
+            self._quiet_responses += 1
+            if self._quiet_responses <= 25:
+                self.log("debug", f"yanıt (Reel yok): {urlsplit(url).path[-50:]} {len(text)} bayt")
             return
         self.responses_with_media += 1
         new = 0
@@ -341,8 +356,30 @@ class Engine:
             return False
         return any(c.get("name") == "sessionid" and c.get("value") for c in cookies)
 
+    async def _log_cookie_names(self) -> None:
+        """Teşhis için: hangi çerezlerin var olduğu (yalnız adlar; değerler yazılmaz)."""
+        try:
+            cookies = await self.context.cookies()
+            names = sorted({c.get("name", "") for c in cookies})
+            self.log("info", "Çerez adları: " + (", ".join(names) if names else "(yok)"))
+        except Exception as exc:
+            self.log("debug", f"çerezler okunamadı: {exc}")
+
     def _page_alive(self) -> bool:
-        return self.page is not None and not self.page.is_closed()
+        """Ana sekme kapandıysa ama başka sekme açıksa ona geç; hiç sekme kalmadıysa tarayıcı gitmiştir."""
+        if self.page is None:
+            return False
+        if not self.page.is_closed():
+            return True
+        try:
+            others = [p for p in (self.context.pages if self.context else []) if not p.is_closed()]
+        except Exception:
+            others = []
+        if others:
+            self.page = others[-1]
+            self.log("info", "Sekme değişti: " + urlsplit(self.page.url).path[:60])
+            return True
+        return False
 
     async def _loop(self) -> None:
         tick = 0.25
@@ -354,6 +391,9 @@ class Engine:
             await self._handle_commands()
             now = time.monotonic()
             self.page_url = self.page.url
+            if self.page_url != self._last_logged_url:
+                self._last_logged_url = self.page_url
+                self.log("info", "Sayfa: " + urlsplit(self.page_url).path[:80])
 
             if now - last_login_check > 2.0 or not self.logged_in:
                 if now - last_login_check > 1.0:
@@ -368,6 +408,14 @@ class Engine:
                     if was and not self.logged_in:
                         self.log("warn", "Oturum kapandı.")
             if not self.logged_in:
+                if not self._login_page_shown and "/accounts/login" not in self.page_url and "/challenge" not in self.page_url:
+                    self._login_page_shown = True       # giriş yokken Reels'te kalma: doğrudan giriş sayfası
+                    if not self._cookie_names_logged:
+                        self._cookie_names_logged = True
+                        await self._log_cookie_names()
+                    self.log("info", "Giriş yok: giriş sayfası açılıyor.")
+                    await self._goto(self.settings["start_url"].split("/reels")[0].rstrip("/") + "/accounts/login/"
+                                     if "/reels" in self.settings["start_url"] else self.settings["start_url"])
                 if "/challenge" in self.page_url:
                     self.phase, self.message = "giris", "Instagram doğrulama istiyor. Tarayıcı penceresinde tamamla."
                 else:

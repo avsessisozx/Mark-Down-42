@@ -158,6 +158,40 @@ class LoginTests(EngineBase):
         self.assertTrue(self.engine.logged_in)
 
 
+class LoginPageTests(EngineBase):
+    def test_logged_out_on_reels_goes_to_login_page(self):
+        self.fake.logged_in = False
+        with self.fake.lock:
+            self.fake.requests.clear()
+        self.engine.start(self.settings(start_url=self.base + "/reels/?anon=1"))
+        self.assertTrue(wait_for(lambda: self.engine.phase == "giris", 30))
+        ok = wait_for(lambda: any(p.startswith("/accounts/login") for _m, p in list(self.fake.requests)), 20)
+        self.assertTrue(ok, "giriş sayfasına gitmedi: " + str(self.engine.snapshot()["logs"][-6:]))
+        logs = " ".join(e["text"] for e in self.engine.snapshot()["logs"])
+        self.assertIn("Çerez adları", logs)
+
+
+class ClipboardTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "yalnız Windows")
+    def test_unicode_survives(self):
+        import base64
+        import subprocess
+        from reels_gozlemci import server
+        old = os.environ.pop("REELS_GOZLEMCI_NO_OPEN", None)
+        try:
+            text = "Reels Gözlemci raporu — çğıöşü İ"
+            if not server._copy_to_clipboard(text):
+                self.skipTest("Bu ortamda pano kullanılamıyor")
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Clipboard -Raw)))"],
+                capture_output=True, timeout=30).stdout.decode().strip()
+            self.assertEqual(base64.b64decode(out).decode("utf-8").strip(), text)
+        finally:
+            if old is not None:
+                os.environ["REELS_GOZLEMCI_NO_OPEN"] = old
+
+
 class ServerTests(EngineBase):
     def setUp(self):
         super().setUp()

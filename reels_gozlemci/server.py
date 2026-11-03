@@ -61,14 +61,28 @@ def _open_folder(path: Path) -> None:
 
 
 def _copy_to_clipboard(text: str) -> bool:
+    """Metni panoya koyar. Türkçe karakterler bozulmasın diye UTF-8 dosya üzerinden gider (stdin değil)."""
     if sys.platform != "win32" or os.environ.get("REELS_GOZLEMCI_NO_OPEN"):
         return False
+    import tempfile
+    tmp = None
     try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
-                       input=text.encode("utf-8"), timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        return True
+        fd, tmp = tempfile.mkstemp(prefix="rg-pano-", suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        env = dict(os.environ, RG_CLIP_FILE=tmp)
+        cmd = "Set-Clipboard -Value ([IO.File]::ReadAllText($env:RG_CLIP_FILE, [Text.Encoding]::UTF8))"
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], env=env, timeout=20,
+                             capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return res.returncode == 0
     except Exception:
         return False
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def make_handler(state: AppState):

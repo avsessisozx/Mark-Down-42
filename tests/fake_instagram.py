@@ -6,7 +6,7 @@ Gerçek Reels sayfasının test edilebilen davranışlarını taklit eder:
   * ArrowDown ya da fare tekerleği ile sonraki Reel'e geçilir
   * Reel bilgisi sayfanın kendi POST /api/graphql isteğiyle 10'ar 10'ar gelir (gerçek biçime benzer iç içe yapı)
   * <video> süresi 4 sn; geçerli videonun currentTime'ı ilerler, 4 sn'de başa sarar
-Sorgu parametreleri: nokey=1 (klavye çalışmaz, yalnız tekerlek), nourl=1 (adres değişmez; kod sayfadaki bağlantıdan okunur)
+Sorgu parametreleri: anon=1 (girişsiz de Reels sayfasını gösterir, gerçek Instagram'ın girişsiz Reel görünümü gibi), nokey=1 (klavye çalışmaz, yalnız tekerlek), nourl=1 (adres değişmez; kod sayfadaki bağlantıdan okunur)
 Elle çalıştırmak için: python -m tests.fake_instagram --port 8765
 """
 
@@ -145,7 +145,7 @@ def make_handler(state: FakeState):
             if u.path.startswith("/accounts/login"):
                 return self._send(200, LOGIN_HTML)
             if u.path.startswith("/reels"):
-                if not (self._has_cookie() or state.logged_in):
+                if not (self._has_cookie() or state.logged_in) and "anon=1" not in u.query:
                     return self._send(302, "", headers={"Location": "/accounts/login/"})
                 headers = {"Set-Cookie": "sessionid=abc123; Path=/"} if state.logged_in and not self._has_cookie() else {}
                 sections = "\n".join(
