@@ -3,7 +3,7 @@
 > Claude'un çalışma notu. Yalnızca `durum` dalında durur; `main`'e, README'ye ve sürüm notlarına girmez.
 > Yeni sohbette önce bunu oku, repoyu baştan tarama. Her sürümden sonra güncelle.
 
-Son güncelleme: 2026-11-03 · Son sürüm: **v0.2.0** (2026-11-03)
+Son güncelleme: 2026-11-03 · Son sürüm: **v0.3.0** (2026-11-03)
 
 ## Ne yapıyor
 Instagram Reels'i izleyip kaydıran, normal kullanıcıya görünen her şeyi (hesap, açıklama, müzik, beğeni, yorum,
@@ -54,6 +54,15 @@ Kullanıcı: Türkçe, programcı değil; kendi kullanacak. Yedek hesapla kullan
   DOĞRULANMADI (gerçek Instagram): eklenti çerezleriyle program tarayıcısının girişli sayılması (cihaz çerezleri mid/ig_did/datr ile); Instagram doğrulama (challenge) istemesi;
   eklentinin varsayılan tarayıcı Chrome değilse (Edge) çalışmaması.
 
+- v0.3.0 (2026-11-03): kullanıcının 0.2.0 raporu ve istekleri. Gerçek Instagram'da ÇALIŞTI (rapor): eklentiyle hesap ekleme + doğrulama, otomatik kaydırma (3,5 dk'da 48 izleme, 67 Reel bilgisi, scroll_fail 0), duraklat; beğeni/yorum/müzik/hesap/açıklama geliyor; `plays`/`shares`/`duration` boştu.
+  Yapılanlar: (1) Veri klasörü: `paths.documents_dir()` (SHGetKnownFolderPath), `check_writable`, yedek klasör `AppData\ReelsGozlemci\disa-aktarma`, `/api/pick-folder` (PowerShell STA FolderBrowserDialog), `/api/folder-test` (hatanın tam metni), dışa aktarma yazılamazsa yedeğe + uyarı;
+  `livewrite.LiveWriter` her izlemeyi `canli-gorunumler.csv`'ye ekler (dosya Excel'de kilitliyse bekletir, klasör değişince hepsini yeniden yazar). (2) UI: İzle/Veriler sekmeleri, Veriler'de klasör + liste + arama, Reel kartında müzik ve 5 sayı. (3) `ui/analiz.html`: geniş etkileşimli Analiz penceresi (`/analiz`, `/api/analysis`), grafikler kendi SVG/HTML kodumuz
+  (npm/pip bu ortamda erişilemedi, dış kütüphane YOK): senaryo/oturum karşılaştırma, kalma histogramı, en çok hesap/etiket/müzik (tıkla=filtre), reklam pastası, zaman çizgisi, beğeni–izlenme dağılımı, tablo, Reel kartı. (4) Veri: `send_count` sütunu (eski veritabanı otomatik yükseltilir), izlenme/yen. paylaşım/gönderme için ALAN ADI ADAYLARI
+  (`extract._deep_first_int`: play_count, ig_play_count, view_count…; reshare_count/repost_count; send_count/share_count…), video süresi `set_duration_if_missing`, ilk Reel'in bilgisi sayfaya gömülü JSON'dan (`_read_embedded`), rapora "Ham kayıttaki sayaç alanları" listesi (`store.numeric_fields_summary`).
+  Klasör hatası: kullanıcının PC'sinde Documents klasörü normal görünüyor (OneDrive yok); masaüstü bağlantısındaki shell Linux VM, Windows yazma hatasını yeniden üretemedi. Şüphe: Windows "Denetimli klasör erişimi" ya da başka. Hata metni artık görünür.
+  DOĞRULANDI (sahte site + gerçek Chromium + CI Edge): hepsi; testler birim 26, uçtan uca 29, eklenti 3 (+ Analiz ekranı ekran görüntüsüyle elle kontrol edildi). DOĞRULANMADI: klasör seçme penceresi (Windows PowerShell), Windows'ta yazma hatasının gerçek nedeni, gerçek Instagram'da izlenme/yen. paylaşım/gönderme alanlarının adı (raporun sayaç listesine bak),
+  gömülü JSON'dan ilk Reel okuma (gerçek sayfada), Analiz ekranı gerçek veriyle.
+
 ## Yarım / sıradaki
 - DOĞRULANMADI (gerçek Instagram): (1) kendi pencerede giriş doğrulama kilidine takılıyor mu (eski projede sıfır profil takılmıştı;
   burada kalıcı profil); (2) gerçek Reels sayfasında ArrowDown kaydırıyor mu, adres /reels/<kod>/ oluyor mu; (3) Reels sayfasının
@@ -61,6 +70,7 @@ Kullanıcı: Türkçe, programcı değil; kendi kullanacak. Yedek hesapla kullan
   (5) pencere yerleşimi (sol/sağ) ve `sessionid` çerez kontrolü.
   Kullanıcıdan istenecek: ilk denemede "Raporu kopyala" çıktısı (günlükte `yanıt: N kayıt` satırları ve `responses_with_media` sayısı).
 - Doğrulama (challenge) çıkarsa atlatma yardımı YOK; kullanıcı kendi tamamlar.
+- İlk iş: kullanıcının yeni raporundaki 'Ham kayıttaki sayaç alanları' listesinden izlenme/yen. paylaşım/gönderme alan adlarını kesinleştir (gerekirse ekrandan okuma yedeği).
 - Sırada: Android sürümü (kural: iki platformda da olmalı), "sadece X'i beğen" senaryosu (hesapta işlem yapar, riskli),
   İngilizce arayüz, analiz aracı (konu etiketleme, grafik, "bu video neden önerildi" tahmini), Hikayeler/gönderi akışı.
 - Ek: görünür beğeni durumu (`has_liked`) yalnız yanıttan; kullanıcının elle beğenisini ayrıca yakalamıyoruz.
