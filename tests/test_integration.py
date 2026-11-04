@@ -121,10 +121,11 @@ class AutoScrollTests(EngineBase):
         self.assertEqual([v["code"] for v in views], [fake.code_of(i) for i in range(3)])
 
     def test_f_full_scenario_waits_for_video_end(self):
-        self.run_until_done(self.settings(scenario="full", limit=2), timeout=60)
+        # İlk izleme sahte sitenin yüklenme anındaki sürenin kalan kısmıyla başlayabildiği için (yarış) ikincisine bakılır.
+        self.run_until_done(self.settings(scenario="full", limit=3), timeout=60)
         views = self.store.export_views()
-        self.assertEqual(len(views), 2)
-        first = views[0]
+        self.assertEqual(len(views), 3)
+        first = views[1]
         self.assertGreater(first["dwell"], fake.DURATION - 0.8)
         self.assertLess(first["dwell"], fake.DURATION + 3.0)
         self.assertGreater(first["watched"], fake.DURATION - 1.0)
