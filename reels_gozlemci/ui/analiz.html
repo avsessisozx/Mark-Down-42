@@ -117,6 +117,19 @@
     <div class="card"><h2>Beğeni ↔ izlenen oran</h2><div class="hint">Her nokta bir izleme. Sağa: daha çok beğenilen. Yukarı: videonun daha çoğu izlendi. Noktaya tıkla: Reel kartı.</div><div id="cScatter"></div></div>
   </div>
 
+  <div class="grid" id="extra">
+    <div class="card" id="cardRatio">
+      <h2>Sıra dışı videolar</h2>
+      <div class="hint">Takipçisine ya da akıştaki diğerlerine göre çok fazla izlenen Reel'ler (ve beğenilip az gösterilenler). Tıkla: Reel kartı.</div>
+      <div id="cRatio"><div class="hint">Yükleniyor…</div></div>
+    </div>
+    <div class="card" id="cardWatch">
+      <div style="display:flex;justify-content:space-between;align-items:center"><h2>İzleme listesi</h2><button id="bRecheck2">Şimdi kontrol et</button></div>
+      <div class="hint">⭐ işaretlediğin ya da listeye eklediğin Reel'lerin izlenme sayısı zamanla nasıl değişti. Her çizgi bir Reel.</div>
+      <div id="cWatch"><div class="hint">Yükleniyor…</div></div>
+    </div>
+  </div>
+
   <div class="card" id="tableCard">
     <h2>Tüm izlemeler <span id="tcount" style="color:var(--dim);font-weight:400"></span></h2>
     <div class="hint">Sütun başlığına tıkla: sırala. Satıra tıkla: Reel kartı.</div>
@@ -348,6 +361,54 @@ function render() {
   renderPie(rows); renderLine(rows); renderScatter(rows); renderTable(rows);
 }
 
+// ------------------------------------------------------------ oranlar ve izleme listesi
+async function loadExtra() {
+  try {
+    const [rt, wl] = await Promise.all([fetch("/api/ratios").then(r => r.json()), fetch("/api/watchlist").then(r => r.json())]);
+    renderRatio(rt); renderWatch(wl);
+  } catch (e) { /* sonraki turda */ }
+}
+function renderRatio(rt) {
+  const notes = (rt.notes || []).map(n => `<div class="hint">ℹ ${esc(n)}</div>`).join("");
+  const over = rt.overperformers || [], under = rt.underexposed || [];
+  const row = (x, kind) => `<div class="row" data-code="${esc(x.code)}" style="grid-template-columns:150px 1fr 90px" data-tip="${esc(x.flags.join("\n"))}">
+    <div class="lb">${x.username ? "@" + esc(x.username) : esc(x.code)}</div><div class="lb" style="color:var(--dim)">${esc(x.flags[0])}</div><div class="vl">${kind === "o" ? fmtN(x.plays) + " ▶" : fmtN(x.likes) + " ❤"}</div></div>`;
+  $("cRatio").innerHTML = notes +
+    (over.length ? `<div class="grp"><div class="gt">Beklenenden çok izlenenler <span>${over.length}</span></div>${over.slice(0, 12).map(x => row(x, "o")).join("")}</div>` : '<div class="hint">Sıra dışı patlayan Reel bulunamadı (ya da yeterli veri yok).</div>') +
+    (under.length ? `<div class="grp"><div class="gt">Beğenilip az gösterilenler <span>${under.length}</span></div>${under.slice(0, 8).map(x => row(x, "u")).join("")}</div>` : "");
+  $("cRatio").querySelectorAll(".row[data-code]").forEach(r => r.onclick = () => openDrawer(r.dataset.code));
+}
+function renderWatch(wl) {
+  const items = wl.items || [];
+  if (!items.length) { $("cWatch").innerHTML = '<div class="hint">Liste boş. Ana pencerede bir Reel\'i ⭐ ile işaretle ya da "Listeye ekle"ye bas.</div>'; return; }
+  const W = 560, H = 200, L = 40, B = 24, T = 8, R = 10;
+  const series = items.map((it, i) => ({ it, color: COLORS[i % COLORS.length],
+    pts: (it.snapshots || []).filter(s => s.play_count != null || s.like_count != null).map(s => ({ t: s.t, v: s.play_count != null ? s.play_count : s.like_count, kind: s.play_count != null ? "izlenme" : "beğeni" })) }));
+  const all = series.flatMap(s => s.pts);
+  let chart = "";
+  if (all.length >= 2) {
+    const t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t), t0 + 1), maxV = Math.max(1, ...all.map(p => p.v));
+    const x = t => L + (t - t0) / (t1 - t0) * (W - L - R), y = v => H - B - v / maxV * (H - B - T);
+    const grid = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(maxV * f)}" y2="${y(maxV * f)}" stroke="#2c3038"/><text x="${L - 4}" y="${y(maxV * f) + 4}" text-anchor="end">${fmtN(Math.round(maxV * f))}</text>`).join("");
+    const lines = series.filter(s => s.pts.length).map(s => `<polyline fill="none" stroke="${s.color}" stroke-width="2" points="${s.pts.map(p => x(p.t) + "," + y(p.v)).join(" ")}"/>` +
+      s.pts.map(p => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="3.5" fill="${s.color}" data-tip="${esc(nameOf(s.it))}\n${fmtN(p.v)} ${p.kind}\n${new Date(p.t * 1000).toLocaleString("tr-TR")}"/>`).join("")).join("");
+    chart = `<svg viewBox="0 0 ${W} ${H}" width="100%">${grid}${lines}<text x="${W / 2}" y="${H - 4}" text-anchor="middle">zaman →</text></svg>`;
+  } else chart = '<div class="hint">Çizgi için bir Reel\'in en az 2 ölçümü gerekir. "Şimdi kontrol et"e bas ya da bir süre sonra tekrar bak.</div>';
+  $("cWatch").innerHTML = chart + items.map((it, i) => {
+    const sn = it.snapshots || [], last = sn[sn.length - 1], first = sn[0];
+    const gain = last && first && sn.length > 1 && last.play_count != null && first.play_count != null ? last.play_count - first.play_count : null;
+    return `<div class="mini" style="grid-template-columns:14px 1fr 150px;cursor:pointer" data-code="${esc(it.code)}"><span style="color:${COLORS[i % COLORS.length]}">●</span>
+      <div class="lb" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.username ? "@" + esc(it.username) : esc(it.code)} · ${esc(it.caption || "")}</div>
+      <div>${sn.length} ölçüm${gain != null ? " · +" + fmtN(gain) + " ▶" : ""}</div></div>`;
+  }).join("");
+  $("cWatch").querySelectorAll(".mini[data-code]").forEach(r => r.onclick = () => openDrawer(r.dataset.code));
+}
+$("bRecheck2").onclick = async () => {
+  const r = await fetch("/api/recheck", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": "__TOKEN__" }, body: "{}" }).then(x => x.json());
+  $("bRecheck2").textContent = r.ok ? "Kontrol başladı…" : (r.error || "Başlatılamadı");
+  setTimeout(() => { $("bRecheck2").textContent = "Şimdi kontrol et"; loadExtra(); }, r.ok ? 20000 : 4000);
+};
+
 // ------------------------------------------------------------ olaylar
 $("fSession").onchange = e => { F.session = e.target.value; render(); };
 $("fScn").onchange = e => { F.scenario = e.target.value; render(); };
@@ -358,8 +419,9 @@ $("bReload").onclick = () => load(true);
 $("cmpScn").onclick = () => { COMPARE = "scenario"; $("cmpScn").classList.add("on"); $("cmpSes").classList.remove("on"); renderCompare(filtered()); };
 $("cmpSes").onclick = () => { COMPARE = "session"; $("cmpSes").classList.add("on"); $("cmpScn").classList.remove("on"); renderCompare(filtered()); };
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("drawer").classList.remove("open"); });
-setInterval(() => { if ($("live").checked) load(false); }, 8000);
-load(true);
+setInterval(() => { if ($("live").checked) { load(false); loadExtra(); } }, 8000);
+load(true); loadExtra();
+if (location.hash === "#izleme") setTimeout(() => $("cardWatch").scrollIntoView(), 600);
 </script>
 </body>
 </html>

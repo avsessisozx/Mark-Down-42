@@ -120,7 +120,9 @@
       <div class="bar w"><i id="bWatch"></i></div>
       <div class="row">
         <button id="bStar">⭐ İşaretle</button>
+        <button id="bWatchAdd" title="Bu Reel'in sayılarını zamanla izle (Analiz → İzleme listesi)">👁 Listeye ekle</button>
       </div>
+      <div id="watchMsg" class="small" style="margin-top:4px"></div>
       <div class="row" style="margin-top:8px">
         <input type="text" id="noteIn" placeholder="Not yaz (bu Reel için)…">
         <button id="bNote" style="flex:none;width:70px">Ekle</button>
@@ -170,6 +172,30 @@
       </div>
       <label class="chk"><input type="checkbox" id="liveWrite"> Her izlemeyi bu klasöre hemen yaz (canli-gorunumler.csv)</label>
       <div id="dirMsg" class="small" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:4px">Hesap verin (Instagram'dan indirdiğin paket)</div>
+      <div class="small">Instagram'dan hesap bilgilerini <b>JSON</b> biçiminde indir (HTML değil). Mesajların okunmaz. Program paketi okuyup akışınla eşleştirir ve <b>Profilim</b> raporunu çıkarır.</div>
+      <div class="row" style="margin-top:8px">
+        <button id="bAccFile" class="pri">Paketi seç (.zip)</button>
+        <button id="bAccDir">Açılmış klasörü seç</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="bProfil">Profilim'i aç</button>
+        <button id="bAccClear" class="bad" style="flex:none;width:90px">Sil</button>
+      </div>
+      <div id="accDataMsg" class="small" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:4px">İzleme listesi</div>
+      <div class="small">⭐ işaretlediğin ya da "Listeye ekle" dediğin Reel'ler. Sayıları zamanla nasıl değişiyor, grafiği Analiz penceresinde.</div>
+      <div class="row" style="margin-top:8px">
+        <button id="bRecheck">Şimdi kontrol et</button>
+        <button id="bAnaliz2">Analizde aç</button>
+      </div>
+      <div id="recheckMsg" class="small" style="margin-top:6px">Kontrol için program çalışıyor olmalı. Her Reel ayrı sekmede birkaç saniye açılır (Instagram bunu bir izleme sayar).</div>
     </div>
 
     <div class="card">
@@ -271,6 +297,29 @@ $("bTest").onclick = async () => {
 };
 $("liveWrite").onchange = () => api("/api/settings", { live_write: $("liveWrite").checked });
 $("bAnaliz").onclick = () => { window.open("/analiz", "reels-analiz", "width=1280,height=860"); };
+$("bAnaliz2").onclick = () => { window.open("/analiz#izleme", "reels-analiz", "width=1280,height=860"); };
+$("bProfil").onclick = () => { window.open("/profil", "reels-profil", "width=1100,height=860"); };
+async function importAccount(kind) {
+  setMsg($("accDataMsg"), "Seçme penceresi açılıyor (diğer pencerelerin arkasında kalmış olabilir)…");
+  const r = await api("/api/account-import", { pick: kind });
+  if (r.cancelled) return setMsg($("accDataMsg"), "Seçim iptal edildi.");
+  if (!r.ok) return setMsg($("accDataMsg"), r.error || "Okunamadı.", "err");
+  const c = r.summary.categories || {};
+  const parts = Object.keys(c).map(k => k + ": " + c[k]).join(", ");
+  setMsg($("accDataMsg"), "Okundu ✓ " + r.summary.items + " kayıt (" + parts + ")." +
+    (r.summary.unrecognized.length ? "\nTanınmayan " + r.summary.unrecognized.length + " dosya var; raporda listelenir." : ""), "ok");
+}
+$("bAccFile").onclick = () => importAccount("file");
+$("bAccDir").onclick = () => importAccount("folder");
+$("bAccClear").onclick = async () => { if (confirm("İçe aktarılan hesap verisi silinsin mi? (Toplanan Reel'ler silinmez)")) { await api("/api/account-clear", {}); setMsg($("accDataMsg"), "Hesap verisi silindi."); } };
+$("bWatchAdd").onclick = async () => {
+  const r = await api("/api/watch-add", {});
+  $("watchMsg").textContent = r.ok ? (r.new ? "İzleme listesine eklendi." : "Zaten listede.") : (r.error || "Eklenemedi.");
+};
+$("bRecheck").onclick = async () => {
+  const r = await api("/api/recheck", {});
+  setMsg($("recheckMsg"), r.ok ? "Kontrol başladı; günlükte ilerlemeyi görürsün." : (r.error || "Başlatılamadı."), r.ok ? "ok" : "err");
+};
 
 let view = "watch";
 function showView(v) {

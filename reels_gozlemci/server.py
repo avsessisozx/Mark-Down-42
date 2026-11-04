@@ -12,12 +12,13 @@ import sys
 import threading
 import time
 import webbrowser
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
-from . import __version__, export, report, session, winbrowsers
+from . import __version__, export, hesap_verisi, oranlar, profil, report, session, winbrowsers
 from .engine import Engine
 from .livewrite import LiveWriter
 from .paths import (app_data_dir, check_writable, clean_settings, default_export_dir, fallback_export_dir,
@@ -144,7 +145,7 @@ def _open_in_default_browser(url: str) -> bool:
         return False
 
 
-def pick_folder(initial: str = "") -> Optional[str]:
+def pick_folder(initial: str = "", title: str = "Verilerin kaydedileceği klasörü seç") -> Optional[str]:
     """Windows'un klasör seçme penceresini açar; seçilen yolu ya da (iptal/başarısız) None döndürür."""
     if sys.platform != "win32" or os.environ.get("REELS_GOZLEMCI_NO_OPEN"):
         return os.environ.get("REELS_GOZLEMCI_TEST_PICK") or None
@@ -152,7 +153,7 @@ def pick_folder(initial: str = "") -> Optional[str]:
 Add-Type -AssemblyName System.Windows.Forms
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $f = New-Object System.Windows.Forms.FolderBrowserDialog
-$f.Description = 'Verilerin kaydedileceği klasörü seç'
+$f.Description = $env:RG_TITLE
 $f.ShowNewFolderButton = $true
 if ($env:RG_INITIAL -and (Test-Path -LiteralPath $env:RG_INITIAL)) { $f.SelectedPath = $env:RG_INITIAL }
 $owner = New-Object System.Windows.Forms.Form
@@ -162,7 +163,32 @@ if ($f.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { Write-O
 """
     try:
         res = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script],
-                             env=dict(os.environ, RG_INITIAL=initial), capture_output=True, timeout=600,
+                             env=dict(os.environ, RG_INITIAL=initial, RG_TITLE=title), capture_output=True, timeout=600,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        out = res.stdout.decode("utf-8", "replace").strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def pick_file(title: str = "Instagram'dan indirdiğin dosyayı seç") -> Optional[str]:
+    """Windows'un dosya seçme penceresini açar (ZIP ya da JSON); iptal/başarısızsa None."""
+    if sys.platform != "win32" or os.environ.get("REELS_GOZLEMCI_NO_OPEN"):
+        return os.environ.get("REELS_GOZLEMCI_TEST_PICK") or None
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$f = New-Object System.Windows.Forms.OpenFileDialog
+$f.Title = $env:RG_TITLE
+$f.Filter = 'Instagram verisi (*.zip;*.json)|*.zip;*.json|Tüm dosyalar (*.*)|*.*'
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.StartPosition = 'CenterScreen'
+if ($f.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }
+"""
+    try:
+        res = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script],
+                             env=dict(os.environ, RG_TITLE=title), capture_output=True, timeout=600,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         out = res.stdout.decode("utf-8", "replace").strip()
         return out or None
@@ -258,6 +284,7 @@ def make_handler(state: AppState):
         def _report_snapshot(self) -> Dict[str, Any]:
             snap = state.engine.snapshot()
             snap["numeric_fields"] = state.store.numeric_fields_summary()
+            snap["account_data"] = state.store.account_summary()
             folder, warning = state.resolve_out_dir()
             snap["out_dir"] = f"{folder}" + (f" (UYARI: {warning})" if warning else "")
             return snap
@@ -275,8 +302,19 @@ def make_handler(state: AppState):
                 html = (ui_dir() / "analiz.html").read_text(encoding="utf-8")
                 html = html.replace("__TOKEN__", state.token).replace("__VERSION__", __version__)
                 return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            if path in ("/profil", "/profil.html"):
+                html = (ui_dir() / "profil.html").read_text(encoding="utf-8")
+                html = html.replace("__TOKEN__", state.token).replace("__VERSION__", __version__)
+                return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             if path == "/api/analysis":
                 return self._json(self._analysis(urlsplit(self.path).query))
+            if path == "/api/profile":
+                return self._json(profil.build_profile(state.store))
+            if path == "/api/ratios":
+                return self._json(oranlar.analyze(state.store.export_reels()))
+            if path == "/api/watchlist":
+                return self._json({"items": state.store.watch_overview(), "rechecking": state.engine.rechecking,
+                                   "running": state.engine.running})
             if path == "/api/ping":
                 return self._json({"app": APP_ID, "version": __version__})
             if path == "/api/state":
@@ -421,6 +459,43 @@ def make_handler(state: AppState):
                     eng.log("ok", f"Veri klasörü seçildi: {chosen}")
                 return self._json({"ok": True, "folder": chosen, "writable": err is None, "error": err or "",
                                    "settings": state.settings})
+            if path == "/api/account-import":
+                src = str(data.get("path") or "").strip().strip('"')
+                if not src and data.get("pick"):
+                    src = (pick_folder("", "Açılmış Instagram veri klasörünü seç") if data.get("pick") == "folder"
+                           else pick_file()) or ""
+                    if not src:
+                        return self._json({"ok": False, "cancelled": True})
+                p = Path(src)
+                if not p.exists():
+                    return self._json({"ok": False, "error": f"Dosya ya da klasör bulunamadı: {src}"}, 400)
+                try:
+                    summary = hesap_verisi.import_package(p, state.store)
+                except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                    eng.log("error", f"Hesap verisi okunamadı ({src}): {type(exc).__name__}: {exc}")
+                    return self._json({"ok": False, "error": f"Okunamadı: {type(exc).__name__}: {exc}"}, 500)
+                eng.log("ok", f"Hesap verisi içe aktarıldı: {summary['items']} kayıt, {summary['json_files']} JSON dosyası.")
+                if summary["unrecognized"]:
+                    eng.log("debug", "Tanınmayan dosyalar: " + ", ".join(summary["unrecognized"][:15]))
+                return self._json({"ok": summary["items"] > 0, "summary": summary,
+                                   "error": "" if summary["items"] else (summary["errors"][0] if summary["errors"]
+                                                                          else "Tanınan veri bulunamadı.")})
+            if path == "/api/account-clear":
+                state.store.account_clear()
+                return self._json({"ok": True})
+            if path == "/api/watch-add":
+                code = str(data.get("code") or eng.current_code or "").strip()
+                if not code:
+                    return self._json({"ok": False, "error": "Şu an bir Reel görünmüyor."}, 400)
+                return self._json({"ok": True, "new": state.store.watch_add(code, "elle"), "code": code})
+            if path == "/api/watch-remove":
+                state.store.watch_remove(str(data.get("code") or ""))
+                return self._json({"ok": True})
+            if path == "/api/recheck":
+                if not eng.running or not eng.logged_in:
+                    return self._json({"ok": False, "error": "Kontrol için program çalışıyor ve Instagram'a girişli olmalı (Başlat)."}, 400)
+                eng.command("recheck", limit=int(data.get("limit") or 0) or None)
+                return self._json({"ok": True})
             if path == "/api/report-copy":
                 text = report.build(state.settings, self._report_snapshot())
                 return self._json({"ok": _copy_to_clipboard(text), "text": text})

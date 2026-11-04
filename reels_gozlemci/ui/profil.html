@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Reels Gözlemci – Profilim</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#14161a; --card:#1e2127; --card2:#262a31; --line:#2c3038; --txt:#e8eaed; --dim:#9aa0a6; --acc:#ff8a3d; --ok:#4cc38a; --blue:#6aa8ff; --warn:#f2b84b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 "Segoe UI",system-ui,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  header h1 { font-size:17px; margin:0; flex:1; } header small { color:var(--dim); font-weight:400; }
+  button { background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 12px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); } button.on { background:var(--acc); color:#1b1206; border-color:var(--acc); font-weight:600; }
+  .wrap { padding:14px 18px 40px; display:flex; flex-direction:column; gap:14px; max-width:1200px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+  .card h2 { font-size:15px; margin:0 0 4px; } .hint { color:var(--dim); font-size:12px; margin-bottom:10px; }
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+  .big { font-size:30px; font-weight:700; } .sm { color:var(--dim); font-size:12px; }
+  .row { display:grid; grid-template-columns:230px 1fr 70px; gap:8px; align-items:center; padding:3px 0; font-size:13px; }
+  .row .lb { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tr { background:var(--card2); border-radius:6px; height:13px; overflow:hidden; } .tr i { display:block; height:100%; border-radius:6px; background:var(--acc); }
+  .vl { text-align:right; color:var(--dim); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; } .chip { background:#3a2c1c; color:var(--acc); border-radius:999px; padding:3px 10px; font-size:12px; }
+  .chip.b { background:#1c2a3a; color:var(--blue); } .chip.g { background:#1c3a2c; color:var(--ok); } .chip.w { background:#3a341c; color:var(--warn); }
+  .caveat { border-color:#5a4a1c; background:#241f12; color:#e9d9a8; font-size:13px; }
+  .empty { padding:50px 20px; text-align:center; color:var(--dim); }
+  .reel { padding:8px 0; border-bottom:1px solid var(--line); } .reel .u { font-weight:600; } .reel .chips { margin-top:4px; }
+  a { color:var(--blue); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Profilim <small>v__VERSION__ · Instagram seni nasıl görüyor olabilir?</small></h1>
+  <button id="bReload">Yenile</button>
+</header>
+<div class="wrap" id="app"><div class="empty">Yükleniyor…</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pc = x => Math.round((x || 0) * 100);
+let ONLY_UNEXPLAINED = false, P = null;
+
+function bars(items, color) {
+  if (!items || !items.length) return '<div class="sm">Veri yok.</div>';
+  const max = Math.max(...items.map(i => i.n), 1);
+  return items.map(i => `<div class="row"><div class="lb" title="${esc(i.label)}">${esc(i.label)}</div>
+    <div class="tr"><i style="width:${Math.max(3, i.n / max * 100)}%;${color ? "background:" + color : ""}"></i></div><div class="vl">${i.n}</div></div>`).join("");
+}
+function shareRow(label, v, color, tip) {
+  return `<div class="row" title="${esc(tip || "")}"><div class="lb">${esc(label)}</div><div class="tr"><i style="width:${Math.max(2, pc(v))}%;background:${color}"></i></div><div class="vl">%${pc(v)}</div></div>`;
+}
+
+function render() {
+  const d = P, el = $("app");
+  let h = `<div class="card caveat">${d.caveats.map(c => "• " + esc(c)).join("<br>")}</div>`;
+  if (!d.has_account_data) {
+    h += `<div class="card empty"><b>Henüz hesap verisi yok.</b><br>Ana pencerede <b>Veriler</b> sekmesinden Instagram'dan indirdiğin paketi (JSON) seç.
+      Paket olmadan da aşağıda akışının özeti görünür.</div>`;
+  } else {
+    h += `<div class="card"><h2>Paketten okunanlar</h2><div class="hint">Her kutu paketindeki bir veri türü ve kaç kayıt olduğu.</div>
+      <div class="chips">${d.summary.map(s => `<span class="chip b">${esc(s.label)}: <b>${s.n}</b></span>`).join("")}</div></div>`;
+    const t = d.instagram_labels.topics;
+    h += `<div class="card"><h2>Instagram'ın senin için tuttuğu etiketler</h2><div class="hint">${esc(d.instagram_labels.note)}</div>
+      ${t.length ? `<div class="chips">${t.map(x => `<span class="chip w">${esc(x)}</span>`).join("")}</div>` : ""}
+      ${d.instagram_labels.advertisers ? `<div class="sm" style="margin-top:8px">Etkinliğini kullanan reklam veren sayısı: ${d.instagram_labels.advertisers}</div>` : ""}</div>`;
+  }
+  const f = d.feed;
+  if (d.has_feed) {
+    h += `<div class="card"><h2>Akışın bu hesaplarla ne kadar bağlantılı?</h2>
+      <div class="hint">Programın topladığı ${f.reels} Reel içinde (${f.ads} reklam). Her çubuk: akıştaki reklamsız Reel'lerin yüzde kaçı.</div>`;
+    if (d.has_account_data) {
+      h += shareRow("Takip ettiğin hesaplardan", f.share_following, "var(--ok)", "Reel'in hesabını takip ediyorsun")
+        + shareRow("Daha önce beğendiğin hesaplardan", f.share_liked_before, "var(--blue)")
+        + shareRow("Daha önce kaydettiğin hesaplardan", f.share_saved_before, "var(--blue)")
+        + shareRow("Yorum yaptığın hesaplardan", f.share_commented_before, "var(--blue)")
+        + shareRow("Daha önce izlediğin hesaplardan", f.share_watched_before, "var(--blue)")
+        + shareRow("Hiçbir bağlantı bulunamayan", f.share_unexplained, "var(--acc)", "Hesap verinde bu hesapla ilgili hiçbir iz yok");
+    } else h += '<div class="sm">Eşleştirme için hesap verisi gerekir.</div>';
+    h += `</div><div class="grid">
+      <div class="card"><h2>Akışında en çok çıkan hesaplar</h2>${bars(f.top_accounts)}</div>
+      <div class="card"><h2>En çok çıkan etiketler</h2>${bars(f.top_tags, "var(--blue)")}</div>
+      <div class="card"><h2>En çok çıkan müzikler</h2>${bars(f.top_music, "var(--ok)")}</div>`;
+    if (d.has_account_data) h += `<div class="card"><h2>Senin en çok etkileştiğin hesaplar</h2><div class="hint">Beğeni + kayıt + yorum.</div>${bars(d.you.top_engaged)}</div>`;
+    h += "</div>";
+  }
+  if (d.has_account_data) {
+    h += `<div class="grid"><div class="card"><h2>En çok izlediğin hesaplar</h2>${bars(d.you.top_watched, "var(--blue)")}</div>
+      <div class="card"><h2>Yorumlarında geçen etiketler</h2>${bars(d.you.comment_tags, "var(--ok)")}
+      <h2 style="margin-top:12px">Aramaların</h2>${bars(d.you.searches, "var(--warn)")}</div></div>
+      <div class="card"><div class="big">${d.you.following}</div><div class="sm">hesabı takip ediyorsun</div></div>`;
+    const rs = (ONLY_UNEXPLAINED ? d.reasons.filter(r => !r.explained) : d.reasons);
+    h += `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>Bu Reel'ler sana neden çıkmış olabilir?</h2>
+      <div><button id="bAll" class="${ONLY_UNEXPLAINED ? "" : "on"}">Hepsi</button> <button id="bUn" class="${ONLY_UNEXPLAINED ? "on" : ""}">Bağlantı bulunamayanlar</button></div></div>
+      <div class="hint">Kesin sebep değil; hesap verinle akışın arasındaki olası bağlantılar. Sıfırlamadan sonra da çıkıyorsa "Bağlantı bulunamayanlar" listesine bak: bunlar senin geçmişinle açıklanmayan Reel'ler.</div>
+      ${rs.length ? rs.slice(0, 80).map(r => `<div class="reel"><span class="u">${r.username ? "@" + esc(r.username) : esc(r.code)}</span>
+        <span class="sm"> · ${r.n_views} kez izlendi · <a target="_blank" rel="noopener" href="https://www.instagram.com/reel/${encodeURIComponent(r.code)}/">aç</a></span>
+        <div class="chips">${r.why.map(w => `<span class="chip ${r.explained ? "g" : ""}">${esc(w)}</span>`).join("")}</div></div>`).join("") : '<div class="sm">Liste boş.</div>'}</div>`;
+  }
+  el.innerHTML = h;
+  if ($("bAll")) { $("bAll").onclick = () => { ONLY_UNEXPLAINED = false; render(); }; $("bUn").onclick = () => { ONLY_UNEXPLAINED = true; render(); }; }
+}
+async function load() {
+  try { P = await (await fetch("/api/profile")).json(); render(); }
+  catch (e) { $("app").innerHTML = '<div class="empty">Program ile bağlantı yok.</div>'; }
+}
+$("bReload").onclick = load;
+load();
+</script>
+</body>
+</html>

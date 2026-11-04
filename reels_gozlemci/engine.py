@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional
 from urllib.parse import urlsplit
 
-from . import __version__, extract, session, winbrowsers
+from . import __version__, counts, extract, session, winbrowsers
 from .paths import app_data_dir, screen_size
 from .report import redact
 from .store import Store, iso
@@ -50,6 +50,46 @@ VIDEO_JS = r"""() => {
 }"""
 
 
+# Ekrandaki sayaçları (beğeni, yorum, gönderme, yeniden paylaşım, izlenme) okur. Düğmenin erişilebilirlik adı
+# (aria-label) ile yanındaki sayıyı eşler; etiket belirsizse boş bırakır (yanlış alana yazmaktansa atlamak iyi).
+COUNTS_JS = r"""() => {
+  const vh = innerHeight, vw = innerWidth;
+  let best = null, bestArea = 0;
+  for (const v of document.querySelectorAll('video')) {
+    const r = v.getBoundingClientRect();
+    const w = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+    const h = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    if (w * h > bestArea) { bestArea = w * h; best = v; }
+  }
+  if (!best || bestArea < 20000) return [];
+  let root = best.parentElement;
+  for (let i = 0; i < 16 && root && root.parentElement; i++) {
+    const up = root.parentElement;
+    if (up.querySelectorAll('video').length > 1) break;
+    root = up;
+  }
+  const rx = /^[0-9][0-9.,\u00a0\u202f ]*\s?[A-Za-zÇĞİÖŞÜçğıöşü]{0,6}$/;
+  const out = [];
+  for (const el of root.querySelectorAll('span,div,a,button')) {
+    if (el.children.length !== 0) continue;
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 10 || !rx.test(t)) continue;
+    let label = '', p = el;
+    for (let i = 0; i < 5 && p && p !== root.parentElement; i++, p = p.parentElement) {
+      const own = p.getAttribute && (p.getAttribute('aria-label') || p.getAttribute('title'));
+      if (own) { label = own; break; }
+      const labs = new Set();
+      for (const n of p.querySelectorAll('[aria-label]')) labs.add(n.getAttribute('aria-label'));
+      if (labs.size === 1) { label = [...labs][0]; break; }
+      if (labs.size > 1) break;
+    }
+    out.push({label: label, text: t});
+    if (out.length >= 24) break;
+  }
+  return out;
+}"""
+
+
 class BrowserGone(Exception):
     pass
 
@@ -69,6 +109,7 @@ class View:
     notes: List[str] = field(default_factory=list)
     no_scroll_until: float = 0.0
     embedded_tried: bool = False
+    counts_reads: int = 0
 
     def dwell(self) -> float:
         return time.monotonic() - self.t_mono
@@ -112,6 +153,9 @@ class Engine:
         self._initial_cookies: Dict[str, str] = {}
         self._went_to_start = False
         self._verify_at = 0.0
+        self.screen_samples: Deque[str] = deque(maxlen=8)    # ekrandan okunan sayaç adayları (rapor için)
+        self.screen_filled = 0
+        self.rechecking = False
 
     # ------------------------------------------------------------------ dışarıya
     @property
@@ -138,7 +182,8 @@ class Engine:
                 "browser": self.browser_name, "views": self.views, "reels_known": self.store.count_reels(),
                 "responses_seen": self.responses_seen, "responses_with_media": self.responses_with_media,
                 "scroll_fail": self.scroll_fail, "current": cur, "current_code": self.current_code,
-                "next_in": self.next_in, "url": self.page_url,
+                "next_in": self.next_in, "url": self.page_url, "rechecking": self.rechecking,
+                "screen_samples": list(self.screen_samples), "screen_filled": self.screen_filled,
                 "live": ({"path": self.live.status()[0], "error": self.live.status()[1], "written": self.live.written}
                          if self.live is not None else None),
                 "recent": self.store.recent_views(self.session_id, 8) if self.session_id else [],
@@ -498,6 +543,16 @@ class Engine:
             elif name == "star" and self._view is not None:
                 self._view.starred = not self._view.starred
                 self.log("info", ("İşaretlendi: " if self._view.starred else "İşaret kalktı: ") + self._view.code)
+                if self._view.starred and self.store.watch_add(self._view.code, "yıldız"):
+                    self.log("info", f"İzleme listesine eklendi: {self._view.code}")
+            elif name == "watch_add" and self._view is not None:
+                if self.store.watch_add(self._view.code, "elle"):
+                    self.log("info", f"İzleme listesine eklendi: {self._view.code}")
+            elif name == "recheck":
+                if self.rechecking:
+                    self.log("info", "Kontrol zaten sürüyor.")
+                else:
+                    asyncio.get_running_loop().create_task(self._recheck(kw.get("limit")))
             elif name == "note" and self._view is not None:
                 text = str(kw.get("text") or "").strip()
                 if text:
@@ -586,6 +641,10 @@ class Engine:
                 v.embedded_tried = True
                 await self._read_embedded(v.code)
 
+        if v.counts_reads < 2 and v.dwell() > (0.7 if v.counts_reads == 0 else 3.0):
+            v.counts_reads += 1
+            await self._read_screen_counts(self.page, v.code)
+
         self.phase = "duraklatildi" if self.paused else "calisiyor"
         auto = bool(self.settings.get("auto")) and not self.paused
         dwell = v.dwell()
@@ -603,6 +662,62 @@ class Engine:
                         ("Otomatik kaydırıyor." if auto else "İzliyor (otomatik kaydırma kapalı)."))
         if auto and ready and time.monotonic() >= v.no_scroll_until:
             await self._scroll()
+
+    async def _read_screen_counts(self, page: Any, code: str) -> None:
+        """Ekrandaki sayaçları okuyup yanıtta olmayan alanları doldurur. Etiketler günlüğe de yazılır (eşleşme doğrulansın)."""
+        try:
+            cands = await page.evaluate(COUNTS_JS) or []
+        except Exception:
+            return
+        if not cands:
+            return
+        if len(self.screen_samples) < 8 or random.random() < 0.05:
+            self.screen_samples.append(f"{code}: " + counts.summarize_candidates(cands))
+        fields = counts.fields_from_candidates(cands)
+        written = self.store.fill_screen_counts(code, fields) if fields else []
+        if written:
+            self.screen_filled += 1
+            self.log("debug", f"ekrandan okundu ({code}): {', '.join(written)}")
+            if code == self.current_code:
+                self._refresh_current(code)
+
+    async def _recheck(self, limit: Optional[int] = None) -> None:
+        """İzleme listesindeki Reel'leri sırayla ayrı sekmede açıp sayılarını yeniden ölçer (yavaş, rastgele aralıklı)."""
+        codes = self.store.watch_codes()
+        if limit:
+            codes = codes[-int(limit):]
+        if not codes:
+            self.log("info", "İzleme listesi boş.")
+            return
+        self.rechecking = True
+        done = 0
+        try:
+            self.log("info", f"İzleme listesi kontrol ediliyor ({len(codes)} Reel)…")
+            for code in codes:
+                if self._stop.is_set():
+                    break
+                page = None
+                try:
+                    page = await self.context.new_page()
+                    parts = urlsplit(self.settings["start_url"])
+                    origin = f"{parts.scheme}://{parts.netloc}"
+                    await page.goto(f"{origin}/reel/{code}/", wait_until="domcontentloaded", timeout=45000)
+                    await asyncio.sleep(random.uniform(4.0, 6.5))
+                    await self._read_screen_counts(page, code)
+                    if self.store.snapshot_now(code):
+                        done += 1
+                except Exception as exc:
+                    self.log("warn", f"Kontrol edilemedi ({code}): {str(exc).splitlines()[0] if str(exc) else exc}")
+                finally:
+                    if page is not None:
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
+                await asyncio.sleep(random.uniform(3.0, 7.0))
+            self.log("ok", f"İzleme listesi kontrolü bitti: {done}/{len(codes)} Reel ölçüldü.")
+        finally:
+            self.rechecking = False
 
     async def _read_embedded(self, code: str) -> None:
         """Reel'in bilgisi sayfa açılırken HTML'e gömülü geldiyse (ilk Reel) oradan oku."""

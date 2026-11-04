@@ -43,6 +43,13 @@ def build(settings: Dict[str, Any], snap: Dict[str, Any]) -> str:
     if fields:
         out.append(f"\n--- Ham kayıttaki sayaç alanları ({len(fields)} satır; izlenme/paylaşım/gönderme adını bulmak için) ---")
         out.extend(fields)
+    samples = snap.get("screen_samples") or []
+    out.append(f"\n--- Ekrandan okunan sayaç adayları (etiket=metin; {snap.get('screen_filled', 0)} Reel'de alan dolduruldu) ---")
+    out.extend(samples or ["(hiç sayaç adayı okunamadı)"])
+    acc = snap.get("account_data") or {}
+    if acc:
+        out.append("\n--- Hesap verisi (içe aktarılan kayıt sayıları) ---")
+        out.append(json.dumps(acc, ensure_ascii=False))
     logs = [f"{e.get('t', '')} [{e.get('level', '')}] {str(e.get('text', '')).replace(chr(10), ' ')}"
             for e in (snap.get("logs") or [])]
     out.append(f"\n--- Günlük ({len(logs)} satır) ---")

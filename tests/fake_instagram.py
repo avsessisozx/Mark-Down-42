@@ -25,11 +25,25 @@ DURATION = 4.0
 AD_INDEX = 3
 
 
+def short(n: int) -> str:
+    """Instagram gibi kısaltma: 1053 -> "1,1 B"."""
+    return f"{n / 1000:.1f}".replace(".", ",") + " B" if n >= 1000 else str(n)
+
+
+def side(i: int) -> str:
+    """Kenar çubuğu: düğmenin aria-label'ı + yanındaki sayı (gerçek Instagram'a benzer)."""
+    def btn(label, text):
+        return f'<div class="b"><svg aria-label="{label}" width="20" height="20"></svg><span>{text}</span></div>'
+    return ('<div class="side" style="position:absolute;right:20px;bottom:120px">'
+            + btn("Beğen", short(100 + i * 7)) + btn("Yorum", str(i)) + btn("Yeniden paylaş", str(i * 2))
+            + btn("Paylaş", str(i * 3)) + btn("İzlenme", short(1000 + i * 53)) + "</div>")
+
+
 def code_of(i: int) -> str:
     return f"Fk{i:05d}x"
 
 
-def media_of(i: int) -> dict:
+def media_of(i: int, noplays: bool = False) -> dict:
     m = {
         "pk": str(5000 + i), "id": f"{5000 + i}_77", "code": code_of(i), "product_type": "clips",
         "taken_at": 1762000000 + i * 60, "media_type": 2,
@@ -42,11 +56,14 @@ def media_of(i: int) -> dict:
     }
     if i == AD_INDEX:
         m["ad_id"] = "ad-123"
+    if noplays:                       # yanıtta izlenme/gönderme yok: ekrandan okunmalı
+        m.pop("play_count", None)
+        m.pop("send_count", None)
     return m
 
 
-def batch_payload(k: int, skip0: bool = False) -> dict:
-    edges = [{"node": {"media": media_of(i)}} for i in range(k * BATCH, min(TOTAL, (k + 1) * BATCH)) if not (skip0 and i == 0)]
+def batch_payload(k: int, skip0: bool = False, noplays: bool = False) -> dict:
+    edges = [{"node": {"media": media_of(i, noplays)}} for i in range(k * BATCH, min(TOTAL, (k + 1) * BATCH)) if not (skip0 and i == 0)]
     return {"data": {"xdt_api__v1_clips__home__connection_v2": {"edges": edges, "page_info": {"has_next_page": True}}},
             "extensions": {"is_final": True}}
 
@@ -78,7 +95,7 @@ vids.forEach((v, i) => {
 async function loadBatch() {
   if (loading || loadedBatches * 10 >= CODES.length) return;
   loading = true;
-  await fetch('/api/graphql', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'batch=' + loadedBatches + (EMBED ? '&skip0=1' : '')});
+  await fetch('/api/graphql', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'batch=' + loadedBatches + (EMBED ? '&skip0=1' : '') + (Q.has('noplays') ? '&noplays=1' : '')});
   loadedBatches++; loading = false;
 }
 const io = new IntersectionObserver(es => {
@@ -145,13 +162,13 @@ def make_handler(state: FakeState):
                 return self._send(200, "ok", "text/plain")
             if u.path.startswith("/accounts/login"):
                 return self._send(200, LOGIN_HTML)
-            if u.path.startswith("/reels"):
+            if u.path.startswith("/reels") or u.path.startswith("/reel/"):
                 if not (self._has_cookie() or state.logged_in) and "anon=1" not in u.query:
                     return self._send(302, "", headers={"Location": "/accounts/login/"})
                 headers = {"Set-Cookie": "sessionid=abc123; Path=/"} if state.logged_in and not self._has_cookie() else {}
                 sections = "\n".join(
                     f'<section data-i="{i}"><video muted playsinline></video>'
-                    f'<a class="u" href="/reel/{code_of(i)}/">@kisi{i % 5}</a></section>' for i in range(TOTAL))
+                    f'<a class="u" href="/reel/{code_of(i)}/">@kisi{i % 5}</a>{side(i) if "counts=1" in u.query else ""}</section>' for i in range(TOTAL))
                 embed = ""
                 if "embed=1" in u.query:     # ilk Reel'in bilgisi sayfaya gömülü gelir (gerçek Instagram'da da böyle olabiliyor)
                     embed = ('<script type="application/json" id="boot">'
@@ -171,7 +188,7 @@ def make_handler(state: FakeState):
             if u.path == "/api/graphql":
                 q = parse_qs(body)
                 k = int(q.get("batch", ["0"])[0])
-                return self._send(200, json.dumps(batch_payload(k, skip0="skip0" in q)), "application/json")
+                return self._send(200, json.dumps(batch_payload(k, skip0="skip0" in q, noplays="noplays" in q)), "application/json")
             self._send(404, "yok", "text/plain")
 
     return H

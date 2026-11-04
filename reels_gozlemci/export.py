@@ -16,7 +16,7 @@ VIEW_COLUMNS = ["session_id", "scenario", "seq", "time", "code", "username", "ac
 REEL_COLUMNS = ["code", "username", "full_name", "caption", "hashtags", "music", "like_count", "comment_count",
                 "play_count", "reshare_count", "send_count", "like_first", "comment_first", "play_first", "duration", "product_type",
                 "taken_at", "is_ad", "has_liked", "likes_hidden", "location", "first_seen", "last_seen", "n_views",
-                "total_dwell", "total_watched", "pk"]
+                "total_dwell", "total_watched", "pk", "follower_count", "counts_src"]
 
 
 def _cell(v: Any) -> Any:

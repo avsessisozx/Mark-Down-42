@@ -180,6 +180,7 @@ def media_record(d: Dict[str, Any]) -> Dict[str, Any]:
                                           "fb_play_count", "video_play_count")),
         "reshare_count": _deep_first_int(d, ("reshare_count", "repost_count", "reposts_count")),
         "send_count": _deep_first_int(d, ("send_count", "sends_count", "direct_send_count", "share_count")),
+        "follower_count": _deep_first_int(user, ("follower_count", "followers_count")) if user else None,
         "duration": float(duration) if duration is not None else None,
         "music": _music(d),
         "product_type": str(d.get("product_type") or ""),
