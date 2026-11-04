@@ -3,7 +3,7 @@
 > Claude'un çalışma notu. Yalnızca `durum` dalında durur; `main`'e, README'ye ve sürüm notlarına girmez.
 > Yeni sohbette önce bunu oku, repoyu baştan tarama. Her sürümden sonra güncelle.
 
-Son güncelleme: 2026-11-03 · Son sürüm: **v0.3.0** (2026-11-03)
+Son güncelleme: 2026-11-04 · Son sürüm: **v0.4.0** (2026-11-04)
 
 ## Ne yapıyor
 Instagram Reels'i izleyip kaydıran, normal kullanıcıya görünen her şeyi (hesap, açıklama, müzik, beğeni, yorum,
@@ -63,6 +63,15 @@ Kullanıcı: Türkçe, programcı değil; kendi kullanacak. Yedek hesapla kullan
   DOĞRULANDI (sahte site + gerçek Chromium + CI Edge): hepsi; testler birim 26, uçtan uca 29, eklenti 3 (+ Analiz ekranı ekran görüntüsüyle elle kontrol edildi). DOĞRULANMADI: klasör seçme penceresi (Windows PowerShell), Windows'ta yazma hatasının gerçek nedeni, gerçek Instagram'da izlenme/yen. paylaşım/gönderme alanlarının adı (raporun sayaç listesine bak),
   gömülü JSON'dan ilk Reel okuma (gerçek sayfada), Analiz ekranı gerçek veriyle.
 
+- v0.4.0 (2026-11-04): kullanıcının isteği: "Instagram beni nasıl görüyor / neden bunu öneriyor" için sayıların ötesinde anlamlı veri.
+  (1) `counts.py` + `engine.COUNTS_JS`: ekrandaki sayaçları (aria-label'lı düğme + yanındaki sayı) okur, "1,2 B"/"3 Mn" -> sayı; YALNIZ yanıtta boş olan alanlara yazar (`store.fill_screen_counts`, `reels.counts_src`); etiket=metin adayları rapora ("Ekrandan okunan sayaç adayları").
+  (2) `hesap_verisi.py`: Instagram "bilgilerini indir" paketi (JSON; ZIP/klasör/dosya) -> `account_items` tablosu; DM klasörleri (messages/inbox) HİÇ okunmaz; Latin-1 bozuk UTF-8 düzeltilir; dosya yolundan kategori (takip, begeni, kayit, yorum, izlenen_video, ilgi_alani, arama…); tanınmayan dosyalar özette ve günlükte. Ana pencere Veriler sekmesi: "Paketi seç (.zip)" / "Açılmış klasörü seç" (`/api/account-import`, PowerShell OpenFileDialog/FolderBrowserDialog).
+  (3) `profil.py` + `ui/profil.html` (`/profil`, `/api/profile`): kural tabanlı "Profilim": paketten okunanlar, Instagram'ın kendi ilgi etiketleri, akışın takip/beğeni/kayıt/yorum/izleme ile bağlantı oranları, Reel başına olası bağlantılar, "bağlantı bulunamayanlar". Instagram'ın gerçek profili DEĞİL (uyarı sayfada).
+  (4) `oranlar.py` (`/api/ratios`): izlenme/takipçi, beğeni/izlenme, yaş; sıra dışı patlayan + "beğenilip az gösterilen"; takipçi (`reels.follower_count`) yanıtta yoksa akış ortancasına göre; Analiz'de "Sıra dışı videolar".
+  (5) İzleme listesi: `watchlist`/`snapshots` tabloları; ⭐ otomatik ekler, "Listeye ekle" düğmesi, `engine._recheck` (her Reel ayrı sekmede 4–6 sn, 3–7 sn arayla; programın çalışıyor olması gerekir), Analiz'de çizgi grafik. Dışa aktarmaya follower_count + counts_src.
+  DOĞRULANDI (sahte site + gerçek Chromium + sahte paket): ekran sayacı okuma ve ezmeme, paket (klasör+zip, DM atlama, mojibake, HTML-only hata), profil/oran hesapları, sunucu uçları + token, izleme listesi ölçümleri ve yeniden kontrol, sayfa ekran görüntüleri. Testler: tüm paket 80 (v040: 21).
+  DOĞRULANMADI (gerçek): (a) gerçek Instagram'da sayaç düğmelerinin aria-label'ları (TR/EN) ve izlenme sayısının Reels ekranında görünüp görünmediği — raporun "sayaç adayları" satırına bak; (b) gerçek paket dosya adları/şeması (kategori eşleşmesi; tanınmayan dosya listesine bak; ilgi alanı dosyasının varlığı ülkeye göre değişir); (c) `/reel/<kod>/` sekmesinde yeniden ölçümün gerçek Instagram'da çalışması; (d) klasör/dosya seçme pencereleri (Windows PowerShell); (e) takipçi sayısı akış yanıtında çoğu zaman yok olabilir.
+
 ## Yarım / sıradaki
 - DOĞRULANMADI (gerçek Instagram): (1) kendi pencerede giriş doğrulama kilidine takılıyor mu (eski projede sıfır profil takılmıştı;
   burada kalıcı profil); (2) gerçek Reels sayfasında ArrowDown kaydırıyor mu, adres /reels/<kod>/ oluyor mu; (3) Reels sayfasının
@@ -71,7 +80,8 @@ Kullanıcı: Türkçe, programcı değil; kendi kullanacak. Yedek hesapla kullan
   Kullanıcıdan istenecek: ilk denemede "Raporu kopyala" çıktısı (günlükte `yanıt: N kayıt` satırları ve `responses_with_media` sayısı).
 - Doğrulama (challenge) çıkarsa atlatma yardımı YOK; kullanıcı kendi tamamlar.
 - İlk iş: kullanıcının yeni raporundaki 'Ham kayıttaki sayaç alanları' listesinden izlenme/yen. paylaşım/gönderme alan adlarını kesinleştir (gerekirse ekrandan okuma yedeği).
-- Sırada: Android sürümü (kural: iki platformda da olmalı), "sadece X'i beğen" senaryosu (hesapta işlem yapar, riskli),
+- v0.5.0 planı (kullanıcı onayladı): içerik analizi YEREL ve programa gömülü (kalite/bulanıklık, ekrandaki yazı OCR, aynı videonun parmak izi; konu/"saçma" etiketi zayıf, sonraya), "neden çıktı" kuralları, 'İlgilenmiyorum' deneyi (VARSAYILAN KAPALI anahtar, kullanıcının seçtiği sayıda işaretleme, günlük üst sınır, tür seçimi: reklam/pikselli/saçma/çalıntı, her işlem günlükte, yavaş+rastgele aralık, yedek hesap; önce gerçek ekranda butonun adı/yeri bakılacak, tahmin edilmeyecek), işaretleme öncesi/sonrası oran ölçümü, iki hesap paketini (öncesi/sonrası) karşılaştırma. Önce yerel modellerin bu ortamda kurulup test edilebildiği kontrol edilecek.
+- Sonraya: Duck.ai 'ikinci görüş' (günlük limit düşük, resmi API yok, yalnız belirsiz videolar için), patlama tahmini puanı (veri azlığı/çarpıklık; önce izleme listesiyle veri biriksin), Android sürümü (kural: iki platformda da olmalı), "sadece X'i beğen" senaryosu (hesapta işlem yapar, riskli),
   İngilizce arayüz, analiz aracı (konu etiketleme, grafik, "bu video neden önerildi" tahmini), Hikayeler/gönderi akışı.
 - Ek: görünür beğeni durumu (`has_liked`) yalnız yanıttan; kullanıcının elle beğenisini ayrıca yakalamıyoruz.
 
