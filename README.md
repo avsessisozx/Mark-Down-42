@@ -1,5 +1,7 @@
 # Reels Gözlemci
 
+> ⬇️ **İndir:** [Windows (EXE)](https://github.com/avsessisozx/Mark-Down-42/releases/latest/download/ReelsGozlemci.exe)
+
 Instagram Reels akışını izleyen, kaydıran ve normal bir kullanıcıya görünen her şeyi bir veri setine yazan Windows programı.
 Amaç: akışın hangi davranışa nasıl tepki verdiğini gözlemlemek (beğeni, yorum, izlenme, ekranda kalma süresi, reklam…).
 
