@@ -82,22 +82,38 @@ jobs:
           REELS_GOZLEMCI_BROWSER: chromium
         run: python -m unittest tests.test_extension -v
 
+  # Testler geçince hangi dala gönderildiyse oradan yayınlar (ikinci derleme yok).
+  # Aynı sürüm numarası bir kez yayınlanır: yeni yayın için reels_gozlemci/__init__.py'deki sürümü artır.
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     needs: [windows, eklenti]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Sürüm numarasını oku
         id: ver
-        run: echo "version=$(python3 -c 'import reels_gozlemci as d; print(d.__version__)')" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(python3 -c 'import reels_gozlemci as d; print(d.__version__)')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "yeni=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$v zaten yayında; yeniden yayınlanmadı (yeni yayın için sürümü artır)."
+          else
+            echo "yeni=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/download-artifact@v4
+        if: steps.ver.outputs.yeni == 'true'
         with:
           path: dist
 
       - name: Sürüm yayınla
+        if: steps.ver.outputs.yeni == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
@@ -106,3 +122,8 @@ jobs:
           make_latest: true
           files: dist/ReelsGozlemci/ReelsGozlemci.exe
           body_path: surum-notu.md
+
+      - name: main dalını yayınlanan koda getir
+        if: steps.ver.outputs.yeni == 'true' && github.ref != 'refs/heads/main'
+        run: |
+          git push origin HEAD:refs/heads/main || echo "::warning::main ileri sarılamadı (main'de başka değişiklik var); elle birleştir."
