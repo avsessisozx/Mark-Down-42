@@ -91,3 +91,39 @@ def summarize_candidates(cands: List[Dict[str, object]], limit: int = 12) -> str
     for c in cands[:limit]:
         parts.append(f"{str(c.get('label') or '?')[:30]}={str(c.get('text') or '')[:12]}")
     return "; ".join(parts)
+
+
+def _near(screen: int, exact: Optional[int]) -> bool:
+    """Ekrandaki (kısaltılmış olabilir) sayı yanıttaki kesin sayıyla uyumlu mu? "27,8 B" ~ 27855."""
+    if exact is None:
+        return False
+    if screen == exact:
+        return True
+    if exact < 1000:
+        return False
+    return abs(screen - exact) <= max(0.051 * exact, 1)
+
+
+def fields_by_position(cands: Iterable[Dict[str, object]], known: Dict[str, Optional[int]]) -> Dict[str, int]:
+    """Etiketsiz sayaçlar için: Reels ekranındaki sıra beğeni, yorum, repost, gönderme'dir.
+
+    Sıra, yanıttan bilinen beğeni ve yorum sayısıyla çapalanır; çapa tutmazsa hiçbir şey yazılmaz
+    (yanlış alana sayı yazmaktansa boş bırakmak). Beğeniler gizliyse okunmaz.
+    """
+    if known.get("likes_hidden"):
+        return {}
+    nums = [n for n in (parse_count(c.get("text")) for c in cands) if n is not None]
+    like, comment, send = known.get("like_count"), known.get("comment_count"), known.get("send_count")
+    for i in range(len(nums) - 1):
+        yorum_tutuyor = _near(nums[i + 1], comment) if comment else nums[i + 1] == 0
+        if _near(nums[i], like) and yorum_tutuyor:
+            rest = nums[i + 2:i + 4]
+            out: Dict[str, int] = {}
+            if len(rest) == 2:
+                out["reshare_count"], out["send_count"] = rest
+            elif len(rest) == 1:
+                if send is not None and _near(rest[0], send):
+                    out["send_count"] = rest[0]
+                # tek sayı kalıp gönderme sayısı bilinmiyorsa hangisi olduğu belirsiz: yazma
+            return out
+    return {}

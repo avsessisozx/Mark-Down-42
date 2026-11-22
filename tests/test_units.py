@@ -124,9 +124,12 @@ class NewFieldTests(unittest.TestCase):
         self.assertEqual((rec["play_count"], rec["reshare_count"], rec["send_count"]), (4321, 7, 12))
 
     def test_send_count_stored_and_exported(self):
-        self.store.upsert_media(extract.media_record(media("SEND123", send_count=9, reshare_count=3)))
+        self.store.upsert_media(extract.media_record(media("SEND123", send_count=9, repost_count=3)))
         reel = self.store.get_reel("SEND123")
         self.assertEqual((reel["send_count"], reel["reshare_count"]), (9, 3))
+        # 0.5.0: Instagram'ın "reshare_count"u gönderme sayısıdır
+        rec = extract.media_record(media("RESH123", reshare_count=5))
+        self.assertEqual((rec["send_count"], rec["reshare_count"]), (5, None))
         self.assertIn("send_count", export.VIEW_COLUMNS)
         self.assertIn("send_count", export.REEL_COLUMNS)
 
@@ -290,3 +293,50 @@ class SessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EkranSirasiTest(unittest.TestCase):
+    """0.5.0: etiketsiz sayaçlar sırayla eşlenir (gerçek akıştan alınmış örneklerle)."""
+
+    def _c(self, *texts):
+        return [{"label": "", "text": t} for t in texts]
+
+    def test_dort_sayac(self):
+        from reels_gozlemci.counts import fields_by_position
+        out = fields_by_position(self._c("27,8 B", "1.131", "958", "32,6 B"),
+                                 {"like_count": 27855, "comment_count": 1131, "send_count": 32648})
+        self.assertEqual(out, {"reshare_count": 958, "send_count": 32600})
+
+    def test_milyon(self):
+        from reels_gozlemci.counts import fields_by_position
+        out = fields_by_position(self._c("2,7 Mn", "11,3 B", "47,5 B", "1,4 Mn"),
+                                 {"like_count": 2788089, "comment_count": 11324, "send_count": 1414908})
+        self.assertEqual(out, {"reshare_count": 47500, "send_count": 1400000})
+
+    def test_tek_kalan_belirsiz(self):
+        from reels_gozlemci.counts import fields_by_position
+        out = fields_by_position(self._c("19,1 B", "809", "438"),
+                                 {"like_count": 19109, "comment_count": 809, "send_count": 932})
+        self.assertEqual(out, {})
+
+    def test_cipa_tutmazsa_yazma(self):
+        from reels_gozlemci.counts import fields_by_position
+        self.assertEqual(fields_by_position(self._c("26"), {"like_count": 3, "likes_hidden": 1}), {})
+        self.assertEqual(fields_by_position(self._c("500", "20", "5", "9"),
+                                            {"like_count": 7000, "comment_count": 20}), {})
+
+
+class GocTest(unittest.TestCase):
+    def test_reshare_gondermeye_tasinir(self):
+        import sqlite3, tempfile, os
+        from reels_gozlemci.store import Store
+        yol = os.path.join(tempfile.mkdtemp(), "r.sqlite3")
+        Store(yol).close()
+        db = sqlite3.connect(yol)
+        db.execute("PRAGMA user_version=0")
+        db.execute("INSERT INTO reels(code, reshare_count) VALUES('A1', 77)")
+        db.commit(); db.close()
+        st = Store(yol)
+        row = st.db.execute("SELECT reshare_count, send_count FROM reels WHERE code='A1'").fetchone()
+        self.assertEqual((row[0], row[1]), (None, 77))
+        st.close()

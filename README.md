@@ -12,3 +12,13 @@ Amaç: akışın hangi davranışa nasıl tepki verdiğini gözlemlemek (beğeni
 Ana hesabın yerine yedek bir hesap kullan: Instagram otomatik kaydırmayı kullanım şartlarına aykırı sayar.
 
 Geliştirme: `pip install -r requirements.txt`, testler: `python -m unittest tests.test_units tests.test_integration`.
+
+## Claude bağlantısı
+
+`claude_baglanti/mcp_sunucu.py`, Claude Code'un Gözlemci'yi kullanmasını sağlayan bir MCP sunucusudur: durum, başlat/durdur, izleme listesine ekleme, salt okunur SQL sorgusu, reels'ları türlere ayırma ve tür raporu. Veritabanını değiştirmez; Claude'un tür etiketleri ayrı dosyada (`claude-analiz.sqlite3`) durur. Hesap verisi okunamaz.
+
+```
+python -m venv .venv-mcp
+.venv-mcp\Scripts\pip install -r claude_baglanti\requirements.txt
+claude mcp add reels-gozlemci --scope user -- "<klasör>\.venv-mcp\Scripts\python.exe" "<klasör>\claude_baglanti\mcp_sunucu.py"
+```

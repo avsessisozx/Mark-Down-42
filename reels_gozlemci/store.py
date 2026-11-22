@@ -63,6 +63,14 @@ class Store:
                 self.db.execute("ALTER TABLE reels ADD COLUMN follower_count INTEGER")
             if "counts_src" not in cols:                      # ekrandan okunan alanların listesi ("play_count,send_count")
                 self.db.execute("ALTER TABLE reels ADD COLUMN counts_src TEXT")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] < 1:
+                # 0.5.0: eski sürümler Instagram'ın reshare_count'unu (aslında gönderme sayısı) "yeniden paylaşım"
+                # sütununa yazıyordu. Yanıttan gelen değerleri gönderme sütununa taşı.
+                for table, src in (("reels", "counts_src"), ("snapshots", None)):
+                    cond = f" AND ({src} IS NULL OR {src} NOT LIKE '%reshare_count%')" if src else ""
+                    self.db.execute(f"UPDATE {table} SET send_count=COALESCE(send_count, reshare_count),"
+                                    f" reshare_count=NULL WHERE reshare_count IS NOT NULL{cond}")
+                self.db.execute("PRAGMA user_version=1")
             self.db.commit()
 
     def close(self) -> None:
@@ -130,6 +138,13 @@ class Store:
         return dict(row) if row else None
 
     _COUNT_FIELDS = ("like_count", "comment_count", "play_count", "reshare_count", "send_count")
+
+    def api_counts(self, code: str) -> Dict[str, Optional[int]]:
+        """Bir Reel'in kayıtlı sayıları (ekran okumasını sıraya göre eşlemek için)."""
+        with self._lock:
+            row = self.db.execute("SELECT like_count, comment_count, send_count, likes_hidden FROM reels WHERE code=?",
+                                  (code,)).fetchone()
+        return dict(row) if row else {}
 
     def fill_screen_counts(self, code: str, fields: Dict[str, int]) -> List[str]:
         """Ekrandan okunan sayıları YALNIZ yanıttan gelmemiş (boş) alanlara yazar; yazılan alanların adlarını döndürür."""

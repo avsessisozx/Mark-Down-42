@@ -674,6 +674,8 @@ class Engine:
         if len(self.screen_samples) < 8 or random.random() < 0.05:
             self.screen_samples.append(f"{code}: " + counts.summarize_candidates(cands))
         fields = counts.fields_from_candidates(cands)
+        if not fields:  # Instagram sayaçlarda etiket vermiyor: sırayla eşle (beğeni ve yorumla çapalanır)
+            fields = counts.fields_by_position(cands, self.store.api_counts(code))
         written = self.store.fill_screen_counts(code, fields) if fields else []
         if written:
             self.screen_filled += 1
