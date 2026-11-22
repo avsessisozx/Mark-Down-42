@@ -49,7 +49,7 @@ def media_of(i: int, noplays: bool = False) -> dict:
         "taken_at": 1762000000 + i * 60, "media_type": 2,
         "user": {"username": f"kisi{i % 5}", "full_name": f"Kişi {i % 5}", "pk": str(900 + i % 5)},
         "caption": {"text": f"Deneme Reel {i} #deneme #etiket{i % 3}"},
-        "like_count": 100 + i * 7, "comment_count": i, "play_count": 1000 + i * 53, "reshare_count": i * 2, "send_count": i * 3,
+        "like_count": 100 + i * 7, "comment_count": i, "play_count": 1000 + i * 53, "repost_count": i * 2, "send_count": i * 3,
         "video_duration": DURATION, "has_liked": False,
         "clips_metadata": {"music_info": {"music_asset_info": {"title": "Şarkı", "display_artist": "Sanatçı"}}},
         "video_versions": [{"url": "http://x/y.mp4", "width": 720, "height": 1280}],
