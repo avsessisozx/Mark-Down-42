@@ -295,7 +295,7 @@ def tarama_raporu(en_az: int = 5) -> Dict[str, Any]:
     rows = db.execute(
         "SELECT t.etiket, t.kaynak, r.code, r.username, r.like_count, r.comment_count, r.play_count, r.gonderme,"
         " r.duration, substr(r.caption,1,120) AS caption, h.follower_count FROM tarama t JOIN rv r ON r.code=t.code"
-        " LEFT JOIN hesaplar h ON h.username=r.username WHERE r.product_type='clips'").fetchall()
+        " LEFT JOIN hesaplar h ON h.username=r.username WHERE COALESCE(r.product_type,'')<>'ad'").fetchall()
     g: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         g.setdefault(r["etiket"], {})[r["code"]] = r   # aynı reel bir etikette bir kez
