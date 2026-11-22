@@ -340,3 +340,26 @@ class GocTest(unittest.TestCase):
         row = st.db.execute("SELECT reshare_count, send_count FROM reels WHERE code='A1'").fetchone()
         self.assertEqual((row[0], row[1]), (None, 77))
         st.close()
+
+
+class HedefliTaramaTest(unittest.TestCase):
+    """0.6.0: profil yanıtından takipçi sayısı, tarama kaynağı kaydı."""
+
+    def test_takipci_cikar(self):
+        from reels_gozlemci.extract import extract_users
+        txt = json.dumps({"data": {"user": {"username": "kanal1", "edge_followed_by": {"count": 1234}},
+                                   "items": [{"user": {"username": "kanal2", "follower_count": 99}}]}})
+        self.assertEqual(sorted(extract_users(txt)), [("kanal1", 1234), ("kanal2", 99)])
+        self.assertEqual(extract_users('{"x": 1}'), [])
+
+    def test_tarama_kaydi(self):
+        import tempfile, os
+        from reels_gozlemci.store import Store
+        st = Store(os.path.join(tempfile.mkdtemp(), "r.sqlite3"))
+        self.assertEqual(st.tarama_ekle(["A1", "A2"], "#quiz", "quiz"), 2)
+        self.assertEqual(st.tarama_ekle(["A1"], "#quiz", "quiz"), 0)
+        self.assertEqual(st.tarama_ekle(["A1"], "@kanal", "quiz"), 1)
+        st.hesap_guncelle([("kanal", 10)])
+        st.hesap_guncelle([("kanal", 12)])
+        self.assertEqual(st.db.execute("SELECT follower_count FROM hesaplar WHERE username='kanal'").fetchone()[0], 12)
+        st.close()

@@ -156,6 +156,8 @@ class Engine:
         self.screen_samples: Deque[str] = deque(maxlen=8)    # ekrandan okunan sayaç adayları (rapor için)
         self.screen_filled = 0
         self.rechecking = False
+        self.scanning: Dict[str, Any] = {}           # hedefli tarama ilerlemesi
+        self._scan_labels: Dict[int, tuple] = {}     # id(sekme) -> (kaynak, etiket)
 
     # ------------------------------------------------------------------ dışarıya
     @property
@@ -183,6 +185,7 @@ class Engine:
                 "responses_seen": self.responses_seen, "responses_with_media": self.responses_with_media,
                 "scroll_fail": self.scroll_fail, "current": cur, "current_code": self.current_code,
                 "next_in": self.next_in, "url": self.page_url, "rechecking": self.rechecking,
+                "scanning": dict(self.scanning),
                 "screen_samples": list(self.screen_samples), "screen_filled": self.screen_filled,
                 "live": ({"path": self.live.status()[0], "error": self.live.status()[1], "written": self.live.written}
                          if self.live is not None else None),
@@ -392,6 +395,15 @@ class Engine:
             return
         self.responses_seen += 1
         try:
+            self.store.hesap_guncelle(extract.extract_users(text))
+        except Exception:
+            pass
+        label = None
+        try:
+            label = self._scan_labels.get(id(response.frame.page))
+        except Exception:
+            pass
+        try:
             records = extract.extract_media(text)
         except Exception as exc:
             self.log("debug", f"yanıt çözülemedi: {exc}")
@@ -402,6 +414,10 @@ class Engine:
                 self.log("debug", f"yanıt (Reel yok): {urlsplit(url).path[-50:]} {len(text)} bayt")
             return
         self.responses_with_media += 1
+        if label:
+            added = self.store.tarama_ekle([r["code"] for r in records], label[0], label[1])
+            with self._lock:
+                self.scanning["bulunan"] = self.scanning.get("bulunan", 0) + added
         new = 0
         for rec in records:
             if self.store.upsert_media(rec):
@@ -553,6 +569,11 @@ class Engine:
                     self.log("info", "Kontrol zaten sürüyor.")
                 else:
                     asyncio.get_running_loop().create_task(self._recheck(kw.get("limit")))
+            elif name == "scan":
+                if self.scanning.get("calisiyor"):
+                    self.log("info", "Tarama zaten sürüyor.")
+                else:
+                    asyncio.get_running_loop().create_task(self._scan(kw.get("hedefler") or []))
             elif name == "note" and self._view is not None:
                 text = str(kw.get("text") or "").strip()
                 if text:
@@ -682,6 +703,59 @@ class Engine:
             self.log("debug", f"ekrandan okundu ({code}): {', '.join(written)}")
             if code == self.current_code:
                 self._refresh_current(code)
+
+    async def _scan(self, hedefler: List[Dict[str, Any]]) -> None:
+        """Hedefli tarama: her hedef sayfayı (hashtag, arama, profil) ayrı sekmede açıp kaydırır.
+
+        Sayfanın kendi aldığı yanıtlar her zamanki gibi kaydedilir; ayrıca her Reel'in hangi hedeften geldiği
+        (kaynak, etiket) tarama tablosuna yazılır. Instagram'a kendimiz istek göndermeyiz.
+        """
+        with self._lock:
+            self.scanning = {"calisiyor": True, "toplam": len(hedefler), "biten": 0, "bulunan": 0, "simdiki": ""}
+        try:
+            self.log("info", f"Hedefli tarama başladı ({len(hedefler)} sayfa).")
+            for h in hedefler:
+                if self._stop.is_set():
+                    break
+                url, kaynak = str(h.get("url") or ""), str(h.get("kaynak") or "")
+                etiket, kaydirma = str(h.get("etiket") or ""), max(0, min(int(h.get("kaydirma") or 6), 30))
+                if not url.startswith("https://www.instagram.com/"):
+                    continue
+                with self._lock:
+                    self.scanning["simdiki"] = kaynak
+                page = None
+                try:
+                    page = await self.context.new_page()
+                    self._scan_labels[id(page)] = (kaynak, etiket)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    await asyncio.sleep(random.uniform(4.0, 6.0))
+                    for _ in range(kaydirma):
+                        if self._stop.is_set():
+                            break
+                        await page.mouse.wheel(0, random.randint(1800, 2600))
+                        await asyncio.sleep(random.uniform(2.0, 3.8))
+                    await asyncio.sleep(2.0)
+                except Exception as exc:
+                    self.log("warn", f"Taranamadı ({kaynak}): {str(exc).splitlines()[0] if str(exc) else exc}")
+                finally:
+                    if page is not None:
+                        self._scan_labels.pop(id(page), None)
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
+                with self._lock:
+                    self.scanning["biten"] = self.scanning.get("biten", 0) + 1
+                await asyncio.sleep(random.uniform(3.0, 7.0))
+            self.log("ok", f"Hedefli tarama bitti: {self.scanning.get('bulunan', 0)} Reel kaydedildi.")
+        finally:
+            with self._lock:
+                self.scanning["calisiyor"] = False
+                self.scanning["simdiki"] = ""
+            try:
+                await self.page.bring_to_front()
+            except Exception:
+                pass
 
     async def _recheck(self, limit: Optional[int] = None) -> None:
         """İzleme listesindeki Reel'leri sırayla ayrı sekmede açıp sayılarını yeniden ölçer (yavaş, rastgele aralıklı)."""

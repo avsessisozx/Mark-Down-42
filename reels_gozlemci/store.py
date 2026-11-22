@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS account_items(
 CREATE INDEX IF NOT EXISTS acc_cat ON account_items(category);
 CREATE INDEX IF NOT EXISTS acc_code ON account_items(code);
 CREATE INDEX IF NOT EXISTS acc_user ON account_items(username);
+CREATE TABLE IF NOT EXISTS tarama(
+  code TEXT, kaynak TEXT, etiket TEXT, t REAL, PRIMARY KEY(code, kaynak));
+CREATE TABLE IF NOT EXISTS hesaplar(
+  username TEXT PRIMARY KEY, follower_count INTEGER, t REAL);
 CREATE INDEX IF NOT EXISTS views_code ON views(code);
 CREATE INDEX IF NOT EXISTS views_session ON views(session_id);
 """
@@ -138,6 +142,29 @@ class Store:
         return dict(row) if row else None
 
     _COUNT_FIELDS = ("like_count", "comment_count", "play_count", "reshare_count", "send_count")
+
+    def tarama_ekle(self, codes: List[str], kaynak: str, etiket: str) -> int:
+        """Hedefli taramada bir sayfadan gelen Reel kodlarını, hangi aramadan/etiketten geldiğiyle kaydeder."""
+        now = time.time()
+        with self._lock:
+            n = 0
+            for c in codes:
+                cur = self.db.execute("INSERT OR IGNORE INTO tarama(code, kaynak, etiket, t) VALUES(?,?,?,?)",
+                                      (c, kaynak, etiket, now))
+                n += cur.rowcount
+            self.db.commit()
+        return n
+
+    def hesap_guncelle(self, users: List[tuple]) -> None:
+        """[(kullanıcı adı, takipçi sayısı)] kaydeder (son görülen değer)."""
+        if not users:
+            return
+        now = time.time()
+        with self._lock:
+            self.db.executemany("INSERT INTO hesaplar(username, follower_count, t) VALUES(?,?,?)"
+                                " ON CONFLICT(username) DO UPDATE SET follower_count=excluded.follower_count,"
+                                " t=excluded.t", [(u, f, now) for u, f in users])
+            self.db.commit()
 
     def api_counts(self, code: str) -> Dict[str, Optional[int]]:
         """Bir Reel'in kayıtlı sayıları (ekran okumasını sıraya göre eşlemek için)."""

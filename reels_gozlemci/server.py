@@ -496,6 +496,14 @@ def make_handler(state: AppState):
                     return self._json({"ok": False, "error": "Kontrol için program çalışıyor ve Instagram'a girişli olmalı (Başlat)."}, 400)
                 eng.command("recheck", limit=int(data.get("limit") or 0) or None)
                 return self._json({"ok": True})
+            if path == "/api/scan":
+                if not eng.running or not eng.logged_in:
+                    return self._json({"ok": False, "error": "Tarama için program çalışıyor ve Instagram'a girişli olmalı (Başlat)."}, 400)
+                hedefler = [h for h in (data.get("hedefler") or []) if isinstance(h, dict)][:60]
+                if not hedefler:
+                    return self._json({"ok": False, "error": "Hedef yok."}, 400)
+                eng.command("scan", hedefler=hedefler)
+                return self._json({"ok": True, "hedef": len(hedefler)})
             if path == "/api/report-copy":
                 text = report.build(state.settings, self._report_snapshot())
                 return self._json({"ok": _copy_to_clipboard(text), "text": text})

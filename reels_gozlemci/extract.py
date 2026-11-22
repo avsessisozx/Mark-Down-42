@@ -209,3 +209,22 @@ def extract_media(text: str) -> List[Dict[str, Any]]:
                 if old is None or len(rec["raw"]) > len(old["raw"]):
                     found[rec["code"]] = rec
     return list(found.values())
+
+
+def extract_users(text: str) -> List[tuple]:
+    """Yanıttaki hesapların takipçi sayıları: [(kullanıcı adı, takipçi)]. Profil sayfası bu bilgiyi kendisi getirir."""
+    if '"username"' not in text or "follower" not in text:
+        return []
+    found: Dict[str, int] = {}
+    for doc in parse_response_text(text):
+        for d in walk(doc):
+            name = d.get("username")
+            if not isinstance(name, str) or not name:
+                continue
+            n = _int(d.get("follower_count"))
+            if n is None:
+                ebf = d.get("edge_followed_by")
+                n = _int(ebf.get("count")) if isinstance(ebf, dict) else None
+            if n is not None:
+                found[name] = n
+    return list(found.items())

@@ -1,10 +1,7 @@
-**Bu sürümde (0.5.0):**
+**Bu sürümde (0.6.0):**
 
-- **Ekran sayaçları artık okunuyor:** Instagram sayaçlarda etiket vermediği için 0.4.0 hiçbir sayıyı yazamıyordu. Sayılar artık ekrandaki sıraya göre eşleniyor (beğeni, yorum, repost, gönderme). Sıra, Instagram'ın verdiği beğeni ve yorum sayısıyla doğrulanıyor; tutmazsa hiçbir şey yazılmıyor.
-- **Yeni veri: repost sayısı.** Instagram'ın yanıtında yok, yalnız ekrandan okunuyor.
-- **Düzeltme:** Instagram'ın `reshare_count` alanı aslında **gönderme** (kâğıt uçak) sayısı. Eski sürümler bunu "yeniden paylaşım" sütununa yazıyordu. Program ilk açılışta eski kayıtları doğru sütuna taşır.
-- **Claude bağlantısı (isteğe bağlı):** `claude_baglanti/mcp_sunucu.py`. Claude Code bu bağlantıyla programı başlatıp durdurabiliyor, veriyi salt okunur sorgulayabiliyor ve reels'ları türlere ayırıp tür raporu çıkarabiliyor. Hesap verisi (takipçi listesi vb.) bu bağlantıyla okunamaz.
-
-İzlenme sayısı Reels ekranında gösterilmediği için çoğu reel'de hâlâ boş.
+- **Hedefli tarama (yeni):** Program, girişli tarayıcısında verilen hashtag, arama ve profil sayfalarını ayrı sekmede açıp kaydırır. Bu sayfaların kendi yanıtları her zamanki gibi kaydedilir. Her Reel'in hangi aramadan geldiği de yazılır. Profil sayfalarında Instagram **izlenme sayısını** da gönderdiği için o Reel'lerin izlenmesi kaydedilir. Tarama şimdilik Claude bağlantısından başlatılıyor (`hedefli_tara`).
+- **Takipçi sayıları:** Yanıtlarda görünen hesapların takipçi sayısı kaydedilir (izlenme/takipçi oranı için).
+- Claude bağlantısına `hedefli_tara` ve `tarama_raporu` araçları eklendi.
 
 **Kurulum:** `ReelsGozlemci.exe` dosyasını indirip çift tıkla. Windows uyarı verirse **Ek bilgi → Yine de çalıştır**.
